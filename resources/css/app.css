@@ -1,0 +1,76 @@
+@import 'tailwindcss';
+
+@source '../../vendor/laravel/framework/src/Illuminate/Pagination/resources/views/*.blade.php';
+@source '../../storage/framework/views/*.php';
+
+@theme {
+    --font-sans: 'Instrument Sans', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji',
+        'Segoe UI Symbol', 'Noto Color Emoji';
+
+    --animate-fade-up: fade-up 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+    --animate-float: float 14s ease-in-out infinite;
+
+    @keyframes fade-up {
+        from {
+            opacity: 0;
+            transform: translateY(8px);
+        }
+        to {
+            opacity: 1;
+            transform: none;
+        }
+    }
+
+    @keyframes float {
+        0%, 100% {
+            transform: translate(0, 0) scale(1);
+        }
+        50% {
+            transform: translate(24px, -32px) scale(1.08);
+        }
+    }
+}
+
+::selection {
+    background: var(--color-violet-200);
+}
+
+/* Surfaces */
+@utility card {
+    @apply rounded-2xl bg-white shadow-[0_1px_2px_rgb(0_0_0/0.04),0_8px_24px_-12px_rgb(0_0_0/0.08)] ring-1 ring-zinc-950/5;
+}
+
+@utility icon-badge {
+    @apply flex size-10 shrink-0 items-center justify-center rounded-xl ring-1 ring-inset;
+}
+
+/* Buttons */
+@utility btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-3.5 py-2 text-sm font-medium whitespace-nowrap transition duration-150 select-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50;
+}
+
+@utility btn-primary {
+    @apply bg-zinc-900 text-white shadow-sm shadow-zinc-900/20 hover:bg-zinc-800;
+}
+
+@utility btn-ai {
+    @apply bg-linear-to-r from-violet-600 to-indigo-600 text-white shadow-lg shadow-violet-600/25 hover:from-violet-500 hover:to-indigo-500;
+}
+
+@utility btn-secondary {
+    @apply bg-white text-zinc-700 shadow-xs ring-1 ring-zinc-950/10 hover:bg-zinc-50 hover:text-zinc-950;
+}
+
+@utility btn-ghost {
+    @apply text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900;
+}
+
+/* Form fields */
+@utility field {
+    @apply rounded-xl border-0 bg-white px-3 py-2 text-sm text-zinc-900 shadow-xs ring-1 ring-zinc-950/10 transition placeholder:text-zinc-400 hover:ring-zinc-950/20 focus:ring-2 focus:ring-violet-500 focus:outline-none;
+}
+
+@utility scroll-thin {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-zinc-300) transparent;
+}
