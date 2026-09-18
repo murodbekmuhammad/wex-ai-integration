@@ -92,7 +92,7 @@ class PdfController extends Controller
     public function download(Request $request, int $id): StreamedResponse
     {
         $document = $request->user()->pdfDocuments()->findOrFail($id);
-        $disk = Storage::disk('local');
+        $disk = Storage::disk();
 
         abort_unless($disk->exists($document->path), 404, 'This PDF is no longer stored. Collect it again.');
 

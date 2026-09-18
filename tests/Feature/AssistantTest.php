@@ -425,9 +425,9 @@ class AssistantTest extends TestCase
      */
     public function test_document_blocks_attach_each_stored_pdf(): void
     {
-        Storage::fake('local');
-        Storage::disk('local')->put('pdfs/1/a.pdf', '%PDF-invoice-a');
-        Storage::disk('local')->put('pdfs/1/b.pdf', '%PDF-invoice-b');
+        Storage::fake();
+        Storage::disk()->put('pdfs/1/a.pdf', '%PDF-invoice-a');
+        Storage::disk()->put('pdfs/1/b.pdf', '%PDF-invoice-b');
 
         $documents = collect([
             PdfDocument::factory()->make(['path' => 'pdfs/1/a.pdf', 'filename' => 'a.pdf', 'sender' => 'Bob <bob@example.com>', 'subject' => 'March invoice']),

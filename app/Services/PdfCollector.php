@@ -128,7 +128,7 @@ class PdfCollector
             }
 
             $path = "pdfs/{$user->id}/{$message['id']}-{$part['part_id']}.pdf";
-            Storage::disk('local')->put($path, $bytes);
+            Storage::disk()->put($path, $bytes);
 
             $user->pdfDocuments()->updateOrCreate(
                 ['gmail_id' => $message['id'], 'part_id' => $part['part_id']],

@@ -29,7 +29,7 @@ class PdfTest extends TestCase
     {
         parent::setUp();
 
-        Storage::fake('local');
+        Storage::fake();
     }
 
     /**
@@ -93,7 +93,7 @@ class PdfTest extends TestCase
         $this->assertSame('1', $document->part_id);
         $this->assertSame(16, $document->size);
         $this->assertSame('2026-01-01', $document->sent_at->toDateString());
-        Storage::disk('local')->assertExists($document->path);
+        Storage::disk()->assertExists($document->path);
         $this->assertSame('%PDF-1.4 invoice', $document->contents());
     }
 
@@ -260,7 +260,7 @@ class PdfTest extends TestCase
     {
         $user = User::factory()->create();
         $document = PdfDocument::factory()->for($user)->create(['filename' => 'invoice-42.pdf']);
-        Storage::disk('local')->put($document->path, '%PDF-1.4 invoice');
+        Storage::disk()->put($document->path, '%PDF-1.4 invoice');
 
         $response = $this->actingAs($user)->get("/pdfs/{$document->id}/download");
 
@@ -277,7 +277,7 @@ class PdfTest extends TestCase
     public function test_user_cannot_download_someone_elses_pdf(): void
     {
         $document = PdfDocument::factory()->create();
-        Storage::disk('local')->put($document->path, '%PDF-1.4 private');
+        Storage::disk()->put($document->path, '%PDF-1.4 private');
 
         $this->actingAs(User::factory()->create())
             ->get("/pdfs/{$document->id}/download")

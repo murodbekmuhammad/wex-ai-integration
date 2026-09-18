@@ -56,6 +56,6 @@ class PdfDocument extends Model
      */
     public function contents(): ?string
     {
-        return Storage::disk('local')->get($this->path);
+        return Storage::disk()->get($this->path);
     }
 }
