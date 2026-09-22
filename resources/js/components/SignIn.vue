@@ -7,7 +7,7 @@ defineProps({ error: String });
 const features = [
     { icon: 'inbox', title: 'Gmail, synced', text: 'Your newest messages, sorted and filtered in one place.' },
     { icon: 'document', title: 'PDFs, collected', text: 'Every attachment in a date range pulled out automatically.' },
-    { icon: 'sparkles', title: 'Claude, reading', text: 'Ask questions across dozens of documents at once.' },
+    { icon: 'sparkles', title: 'AI, reading', text: 'Ask questions across dozens of documents at once.' },
     { icon: 'table', title: 'Tables, exported', text: 'Excel, PDF or Google Sheets in a single click.' },
 ];
 </script>
@@ -25,12 +25,12 @@ const features = [
 
             <div class="relative flex items-center gap-3">
                 <AppLogo class="size-10" />
-                <span class="text-xl font-semibold tracking-tight">Wex</span>
+                <span class="text-xl font-semibold tracking-tight">Accounting</span>
             </div>
 
             <div class="relative my-auto max-w-lg py-16">
                 <p class="mb-5 inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-xs font-medium text-violet-200 ring-1 ring-white/15 backdrop-blur">
-                    <Icon name="bolt" class="size-3.5" /> Powered by Claude
+                    <Icon name="bolt" class="size-3.5" /> AI integration
                 </p>
                 <h1 class="text-5xl leading-[1.05] font-semibold tracking-tight text-balance">
                     Your inbox, turned into
@@ -51,7 +51,7 @@ const features = [
                 </ul>
             </div>
 
-            <p class="relative text-xs text-zinc-500">© {{ new Date().getFullYear() }} Wex</p>
+            <p class="relative text-xs text-zinc-500">© {{ new Date().getFullYear() }} Accounting</p>
         </aside>
 
         <!-- Sign-in -->
@@ -83,7 +83,7 @@ const features = [
 
                 <p class="mt-6 flex items-start gap-2 text-xs leading-relaxed text-zinc-500">
                     <Icon name="lock" class="mt-px size-4 shrink-0" />
-                    Wex only reads your mail, and only creates the Drive files you choose to export.
+                    AI accounting only reads your mail, and only creates the Drive files you choose to export.
                 </p>
             </div>
         </main>
