@@ -66,8 +66,8 @@ class PdfController extends Controller
      * collect
      *
      * Search Gmail for PDFs the filtered senders mailed within the date range
-     * and store the ones that aren't collected yet, then have Claude tag the
-     * PDFs in the range it hasn't read yet with their report type.
+     * and store the ones that aren't collected yet, then tag the PDFs in the
+     * range that haven't been checked yet with their report type.
      *
      * @param PdfFilterRequest $request
      * @return JsonResponse
@@ -83,22 +83,14 @@ class PdfController extends Controller
             config('services.google.pdf_scan_limit'),
         );
 
-        $classified = 0;
+        // Every PDF in the range, not only the picked type: unchecked ones have no type yet.
+        $pending = $request->user()->pdfDocuments()
+            ->when($request->senders(), fn ($query, $senders) => $query->whereIn('sender_email', $senders))
+            ->whereBetween('sent_at', [$request->sentFrom(), $request->sentUntil()])
+            ->whereNull('classified_at')
+            ->get();
 
-        if (config('services.anthropic.key')) {
-            set_time_limit(config('services.anthropic.time_limit'));
-
-            // Every PDF in the range, not only the picked type: untagged ones have no type yet.
-            $pending = $request->user()->pdfDocuments()
-                ->when($request->senders(), fn ($query, $senders) => $query->whereIn('sender_email', $senders))
-                ->whereBetween('sent_at', [$request->sentFrom(), $request->sentUntil()])
-                ->whereNull('classified_at')
-                ->orderByDesc('sent_at')
-                ->limit(PdfClassifier::MAX_DOCUMENTS)
-                ->get();
-
-            $classified = $this->classifier->classifyPending($pending);
-        }
+        $classified = $this->classifier->classifyPending($pending);
 
         return response()->json(['collected' => $collected, 'classified' => $classified]);
     }
