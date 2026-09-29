@@ -25,10 +25,15 @@ const range = reactive({ from: isoDate(weekAgo), to: today });
 const sender = ref('');
 const senders = ref([]);
 
+// A key from config/report_types.php; '' means every type.
+const reportType = ref('');
+const reportTypes = ref([]);
+
 const documents = ref([]);
 const totalSize = ref(0);
 const collecting = ref(false);
 const collected = ref(null);
+const classified = ref(0);
 const error = ref('');
 
 const question = ref('');
@@ -50,7 +55,7 @@ function handleError(e) {
 }
 
 function filterBody() {
-    return { senders: sender.value ? [sender.value] : [], from: range.from, to: range.to };
+    return { senders: sender.value ? [sender.value] : [], from: range.from, to: range.to, report_type: reportType.value || null };
 }
 
 // Which PDFs Claude should read: the ticked ones, or the newest matching the filters.
@@ -62,6 +67,7 @@ function filterParams() {
     const params = new URLSearchParams(sender.value ? [['senders[]', sender.value]] : []);
     params.append('from', range.from);
     params.append('to', range.to);
+    if (reportType.value) params.append('report_type', reportType.value);
     return params;
 }
 
@@ -73,6 +79,7 @@ async function load() {
         documents.value = data.documents;
         totalSize.value = data.total_size;
         senders.value = data.senders;
+        reportTypes.value = data.report_types;
 
         const ids = new Set(data.documents.map((doc) => doc.id));
         selected.value = selected.value.filter((id) => ids.has(id));
@@ -89,6 +96,7 @@ async function collect() {
     try {
         const data = await api('POST', '/pdfs/collect', filterBody());
         collected.value = data.collected;
+        classified.value = data.classified;
         await load();
     } catch (e) {
         handleError(e);
@@ -152,10 +160,11 @@ function toggleAll() {
 }
 
 const formatDate = (value) => new Date(value).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
+const reportTypeLabel = (key) => reportTypes.value.find((type) => type.key === key)?.label ?? key;
 const formatSize = (bytes) => (bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${(bytes / 1024).toFixed(0)} KB`);
 
-// The list and any analysis belong to the sender and dates they were made for.
-watch(() => [sender.value, range.from, range.to], () => {
+// The list and any analysis belong to the sender, dates and report type they were made for.
+watch(() => [sender.value, range.from, range.to, reportType.value], () => {
     collected.value = null;
     asked.value = '';
     answer.value = '';
@@ -232,12 +241,26 @@ onMounted(load);
                                class="border-0 bg-transparent px-2 py-2 text-sm text-zinc-900 focus:ring-0 focus:outline-none">
                     </div>
                 </div>
+                <div class="grid gap-1.5">
+                    <span class="text-xs font-medium text-zinc-500">Report type</span>
+                    <div class="flex flex-wrap gap-2" role="group" aria-label="Report type">
+                        <button v-for="type in [{ key: '', label: 'All' }, ...reportTypes]" :key="type.key" type="button"
+                                @click="reportType = type.key" :aria-pressed="reportType === type.key"
+                                class="inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-sm font-medium ring-1 transition-colors"
+                                :class="reportType === type.key
+                                    ? 'bg-violet-600 text-white ring-violet-600 shadow-sm shadow-violet-500/30'
+                                    : 'bg-white text-zinc-700 shadow-xs ring-zinc-950/10 hover:bg-zinc-50'">
+                            <Icon name="tag" class="size-4" />
+                            {{ type.label }}
+                        </button>
+                    </div>
+                </div>
 
                 <p v-if="collected !== null"
                    class="ml-auto inline-flex animate-fade-up items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium ring-1"
                    :class="collected ? 'bg-emerald-50 text-emerald-700 ring-emerald-600/15' : 'bg-zinc-100 text-zinc-600 ring-zinc-950/5'">
                     <Icon name="check" class="size-4" />
-                    {{ collected ? `Collected ${collected} new PDF(s)` : 'No new PDFs found' }}
+                    {{ collected ? `Collected ${collected} new PDF(s)` : 'No new PDFs found' }}{{ classified ? `, tagged ${classified}` : '' }}
                 </p>
             </div>
 
@@ -254,7 +277,7 @@ onMounted(load);
                 <p class="font-medium text-zinc-900">{{ collecting ? 'Searching your mailbox' : 'No PDFs here yet' }}</p>
                 <p class="mx-auto mt-1 max-w-sm text-sm text-zinc-500">
                     <template v-if="collecting">Looking for PDF attachments in these dates…</template>
-                    <template v-else>No PDFs {{ sender ? `from ${sender} ` : '' }}in these dates. Click “Collect PDFs” or widen the dates.</template>
+                    <template v-else>No {{ reportType ? `${reportTypeLabel(reportType)} ` : '' }}PDFs {{ sender ? `from ${sender} ` : '' }}in these dates. Click “Collect PDFs” or widen the filters.</template>
                 </p>
             </div>
 
@@ -285,6 +308,10 @@ onMounted(load);
                                 <div class="flex items-center gap-2.5">
                                     <span class="flex h-7 w-6 shrink-0 items-end justify-center rounded-[5px] bg-rose-500 pb-0.5 text-[8px] font-bold text-white shadow-sm shadow-rose-500/30">PDF</span>
                                     <span class="truncate font-medium text-zinc-900" :title="doc.filename">{{ doc.filename }}</span>
+                                    <span v-if="doc.report_type"
+                                          class="shrink-0 rounded-full bg-violet-50 px-2 py-0.5 text-[11px] font-medium text-violet-700 ring-1 ring-violet-600/15">
+                                        {{ reportTypeLabel(doc.report_type) }}
+                                    </span>
                                 </div>
                             </td>
                             <td class="max-w-44 truncate px-3 py-2.5 text-zinc-500" :title="doc.sender">{{ doc.sender_email }}</td>

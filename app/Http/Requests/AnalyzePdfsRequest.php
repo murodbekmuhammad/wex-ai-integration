@@ -44,14 +44,7 @@ class AnalyzePdfsRequest extends PdfFilterRequest
     {
         $ids = $this->validated('document_ids');
 
-        return $this->user()->pdfDocuments()
-            ->when(
-                $ids,
-                fn ($query) => $query->whereIn('id', $ids),
-                fn ($query) => $query
-                    ->when($this->senders(), fn ($query, $senders) => $query->whereIn('sender_email', $senders))
-                    ->whereBetween('sent_at', [$this->sentFrom(), $this->sentUntil()]),
-            )
+        return ($ids ? $this->user()->pdfDocuments()->whereIn('id', $ids) : $this->filteredDocuments())
             ->orderByDesc('sent_at')
             ->orderByDesc('id')
             ->limit(PdfAnalyst::MAX_DOCUMENTS)

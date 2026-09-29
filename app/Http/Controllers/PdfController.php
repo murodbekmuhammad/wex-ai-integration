@@ -3,11 +3,13 @@
 namespace App\Http\Controllers;
 
 use App\Http\Requests\PdfFilterRequest;
+use App\Services\PdfClassifier;
 use App\Services\PdfCollector;
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
@@ -21,15 +23,17 @@ class PdfController extends Controller
      * __construct
      *
      * @param PdfCollector $collector
+     * @param PdfClassifier $classifier
      */
-    public function __construct(private PdfCollector $collector) {}
+    public function __construct(private PdfCollector $collector, private PdfClassifier $classifier) {}
 
     /**
      * index
      *
      * List the PDFs collected from the user's mailbox within the date range,
-     * newest first, optionally only those from certain senders. Also returns
-     * every address that has sent a collected PDF, for the sender picker.
+     * newest first, optionally only those from certain senders or of one
+     * report type. Also returns every address that has sent a collected PDF,
+     * for the sender picker, and the configured report types.
      *
      * @param PdfFilterRequest $request
      * @return JsonResponse
@@ -43,9 +47,7 @@ class PdfController extends Controller
             ->filter()
             ->values();
 
-        $documents = $request->user()->pdfDocuments()
-            ->when($request->senders(), fn ($query, $senders) => $query->whereIn('sender_email', $senders))
-            ->whereBetween('sent_at', [$request->sentFrom(), $request->sentUntil()])
+        $documents = $request->filteredDocuments()
             ->orderByDesc('sent_at')
             ->orderByDesc('id')
             ->get();
@@ -54,6 +56,9 @@ class PdfController extends Controller
             'documents' => $documents,
             'total_size' => $documents->sum('size'),
             'senders' => $senders,
+            'report_types' => collect(config('report_types'))->keys()
+                ->map(fn (string $key) => ['key' => $key, 'label' => Str::ucfirst(str_replace('_', ' ', $key))])
+                ->values(),
         ]);
     }
 
@@ -61,7 +66,8 @@ class PdfController extends Controller
      * collect
      *
      * Search Gmail for PDFs the filtered senders mailed within the date range
-     * and store the ones that aren't collected yet.
+     * and store the ones that aren't collected yet, then have Claude tag the
+     * PDFs in the range it hasn't read yet with their report type.
      *
      * @param PdfFilterRequest $request
      * @return JsonResponse
@@ -77,7 +83,24 @@ class PdfController extends Controller
             config('services.google.pdf_scan_limit'),
         );
 
-        return response()->json(['collected' => $collected]);
+        $classified = 0;
+
+        if (config('services.anthropic.key')) {
+            set_time_limit(config('services.anthropic.time_limit'));
+
+            // Every PDF in the range, not only the picked type: untagged ones have no type yet.
+            $pending = $request->user()->pdfDocuments()
+                ->when($request->senders(), fn ($query, $senders) => $query->whereIn('sender_email', $senders))
+                ->whereBetween('sent_at', [$request->sentFrom(), $request->sentUntil()])
+                ->whereNull('classified_at')
+                ->orderByDesc('sent_at')
+                ->limit(PdfClassifier::MAX_DOCUMENTS)
+                ->get();
+
+            $classified = $this->classifier->classifyPending($pending);
+        }
+
+        return response()->json(['collected' => $collected, 'classified' => $classified]);
     }
 
     /**

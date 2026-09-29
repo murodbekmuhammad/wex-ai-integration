@@ -15,7 +15,7 @@ use Illuminate\Support\Facades\Storage;
  *
  * @package App\Models
  */
-#[Fillable(['gmail_id', 'part_id', 'filename', 'sender', 'sender_email', 'subject', 'size', 'path', 'sent_at'])]
+#[Fillable(['gmail_id', 'part_id', 'filename', 'sender', 'sender_email', 'subject', 'size', 'path', 'sent_at', 'report_type', 'classified_at'])]
 #[Hidden(['user_id', 'path'])]
 class PdfDocument extends Model
 {
@@ -32,6 +32,7 @@ class PdfDocument extends Model
         return [
             'size' => 'integer',
             'sent_at' => 'datetime',
+            'classified_at' => 'datetime',
         ];
     }
 

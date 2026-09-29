@@ -38,4 +38,16 @@ class PdfDocumentFactory extends Factory
             'sent_at' => fake()->dateTimeBetween('-6 days'),
         ];
     }
+
+    /**
+     * invoiceAging
+     *
+     * A PDF Claude has already tagged as an invoice aging report.
+     *
+     * @return static
+     */
+    public function invoiceAging(): static
+    {
+        return $this->state(fn () => ['report_type' => 'invoice_aging', 'classified_at' => now()]);
+    }
 }
