@@ -26,6 +26,7 @@ Route::middleware('auth')->group(function () {
     Route::get('/pdfs/{id}/download', [PdfController::class, 'download'])->whereNumber('id');
     Route::post('/ask', [AssistantController::class, 'ask'])->middleware('throttle:10,1');
     Route::post('/analyze', [AssistantController::class, 'analyze'])->middleware('throttle:10,1');
+    Route::post('/agent', [AssistantController::class, 'agent'])->middleware('throttle:5,1');
     Route::get('/tables', [TableController::class, 'index']);
     Route::post('/tables', [TableController::class, 'store'])->middleware('throttle:10,1');
     Route::get('/tables/{id}', [TableController::class, 'show'])->whereNumber('id');

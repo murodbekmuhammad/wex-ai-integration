@@ -38,6 +38,10 @@ return [
         'workspace' => env('ANTHROPIC_WORKSPACE_ID'),
         // Seconds a request waiting on Claude may run; reading PDFs takes far longer than PHP's usual 30.
         'time_limit' => (int) env('ANTHROPIC_TIME_LIMIT', 300),
+        // Seconds an agent run may take; it can read PDFs, upload and email in one go.
+        'agent_time_limit' => (int) env('ANTHROPIC_AGENT_TIME_LIMIT', 900),
+        // Whether the agent may email report links; off until mail is set up, and the link is shown on screen instead.
+        'agent_email' => (bool) env('AGENT_SEND_EMAIL', false),
     ],
 
     'ses' => [

@@ -53,6 +53,8 @@ watch(() => props.currentId, (id) => {
 });
 
 onMounted(load);
+
+defineExpose({ load });
 </script>
 
 <template>

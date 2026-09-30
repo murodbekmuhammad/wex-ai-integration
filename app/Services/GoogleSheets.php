@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\ReportTable;
 use App\Models\User;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Auth\AuthenticationException;
@@ -21,16 +22,45 @@ use Illuminate\Support\Str;
 class GoogleSheets
 {
     private const FILES_URL = 'https://www.googleapis.com/drive/v3/files';
+
     private const UPLOAD_URL = 'https://www.googleapis.com/upload/drive/v3/files';
+
     private const SHEET_MIME_TYPE = 'application/vnd.google-apps.spreadsheet';
+
     private const XLSX_MIME_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
     /**
      * __construct
      *
      * @param GoogleAuth $google
+     * @param TableExporter $exporter
      */
-    public function __construct(private GoogleAuth $google) {}
+    public function __construct(private GoogleAuth $google, private TableExporter $exporter) {}
+
+    /**
+     * publish
+     *
+     * Upload the table to the user's Drive as a Google Sheet and remember
+     * where it went. A table that was uploaded before and is still in Drive
+     * isn't uploaded again; its existing sheet is kept.
+     *
+     * @param User $user
+     * @param ReportTable $table
+     * @return string the sheet's URL
+     * @throws AuthenticationException when Google no longer accepts the user's tokens
+     * @throws AuthorizationException when the user hasn't granted Google Drive access
+     * @throws RequestException
+     */
+    public function publish(User $user, ReportTable $table): string
+    {
+        if (! $table->google_sheet_id || ! $this->exists($user, $table->google_sheet_id)) {
+            $sheet = $this->upload($user, $table->title, $this->exporter->xlsxContents($table));
+
+            $table->update(['google_sheet_id' => $sheet['id'], 'google_sheet_url' => $sheet['url']]);
+        }
+
+        return $table->google_sheet_url;
+    }
 
     /**
      * upload

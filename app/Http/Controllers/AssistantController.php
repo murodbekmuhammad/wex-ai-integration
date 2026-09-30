@@ -4,9 +4,11 @@ namespace App\Http\Controllers;
 
 use Anthropic\Core\Exceptions\APIException;
 use App\Http\Requests\AnalyzePdfsRequest;
+use App\Http\Requests\RunAgentRequest;
 use App\Services\ClaudeErrors;
 use App\Services\EmailAssistant;
 use App\Services\PdfAnalyst;
+use App\Services\ReportAgent;
 use Closure;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -24,8 +26,9 @@ class AssistantController extends Controller
      *
      * @param EmailAssistant $assistant
      * @param PdfAnalyst $analyst
+     * @param ReportAgent $agent
      */
-    public function __construct(private EmailAssistant $assistant, private PdfAnalyst $analyst) {}
+    public function __construct(private EmailAssistant $assistant, private PdfAnalyst $analyst, private ReportAgent $agent) {}
 
     /**
      * ask
@@ -91,18 +94,42 @@ class AssistantController extends Controller
     }
 
     /**
+     * agent
+     *
+     * Have the report agent carry out the user's task, such as building a
+     * table from invoice PDFs, uploading it to Google Sheets and emailing the
+     * link to the signed-in user. Each step, then the agent's summary, is
+     * streamed back as plain text.
+     *
+     * @param RunAgentRequest $request
+     * @return StreamedResponse|JsonResponse
+     */
+    public function agent(RunAgentRequest $request): StreamedResponse|JsonResponse
+    {
+        if (! config('services.anthropic.key')) {
+            return $this->notConfigured();
+        }
+
+        return $this->stream(
+            fn () => $this->agent->run($request->user(), $request->validated('task')),
+            config('services.anthropic.agent_time_limit'),
+        );
+    }
+
+    /**
      * stream
      *
      * Stream a generator of answer text back to the browser, turning Claude's
      * failures into a readable note at the end of the answer.
      *
      * @param Closure(): iterable<int, string> $answer
+     * @param int|null $timeLimit seconds the answer may take; the usual Claude time limit when null
      * @return StreamedResponse
      */
-    private function stream(Closure $answer): StreamedResponse
+    private function stream(Closure $answer, ?int $timeLimit = null): StreamedResponse
     {
-        return response()->stream(function () use ($answer) {
-            set_time_limit(config('services.anthropic.time_limit'));
+        return response()->stream(function () use ($answer, $timeLimit) {
+            set_time_limit($timeLimit ?? config('services.anthropic.time_limit'));
 
             try {
                 foreach ($answer() as $text) {

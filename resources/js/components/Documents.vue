@@ -2,6 +2,7 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { api, apiStream } from '../api';
 import Icon from './Icon.vue';
+import ReportAgent from './ReportAgent.vue';
 import SavedTables from './SavedTables.vue';
 import Spinner from './Spinner.vue';
 import TableView from './TableView.vue';
@@ -48,6 +49,9 @@ const allSelected = computed(() => documents.value.length > 0 && selected.value.
 // The table on screen, and whether Claude is building or updating one.
 const table = ref(null);
 const building = ref(false);
+
+// Lets the agent panel refresh the list after it saves a table.
+const savedTables = ref(null);
 
 function handleError(e) {
     if (e.status === 401) return emit('unauthorized');
@@ -394,11 +398,13 @@ onMounted(load);
             </div>
         </section>
 
+        <ReportAgent @done="savedTables?.load()" @unauthorized="emit('unauthorized')" />
+
         <TableView v-if="table" :table="table" :busy="building"
                    @revise="reviseTable" @close="table = null"
                    @unauthorized="emit('unauthorized')" />
 
-        <SavedTables :current-id="table?.id" @open="table = $event"
+        <SavedTables ref="savedTables" :current-id="table?.id" @open="table = $event"
                      @deleted="(id) => { if (table?.id === id) table = null; }"
                      @unauthorized="emit('unauthorized')" />
     </div>

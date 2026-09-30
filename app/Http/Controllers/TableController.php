@@ -6,8 +6,8 @@ use Anthropic\Core\Exceptions\APIException;
 use App\Http\Requests\BuildTableRequest;
 use App\Services\ClaudeErrors;
 use App\Services\GoogleSheets;
-use App\Services\TableBuildException;
 use App\Services\TableBuilder;
+use App\Services\TableBuildException;
 use App\Services\TableExporter;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Auth\AuthenticationException;
@@ -147,11 +147,7 @@ class TableController extends Controller
         $table = $user->reportTables()->findOrFail($id);
 
         try {
-            if (! $table->google_sheet_id || ! $this->sheets->exists($user, $table->google_sheet_id)) {
-                $sheet = $this->sheets->upload($user, $table->title, $this->exporter->xlsxContents($table));
-
-                $table->update(['google_sheet_id' => $sheet['id'], 'google_sheet_url' => $sheet['url']]);
-            }
+            $url = $this->sheets->publish($user, $table);
         } catch (AuthorizationException $e) {
             return response()->json(['message' => $e->getMessage()], 403);
         } catch (RequestException $e) {
@@ -160,7 +156,7 @@ class TableController extends Controller
             return response()->json(['message' => 'Google Drive could not take the file right now. Please try again.'], 502);
         }
 
-        return response()->json(['google_sheet_url' => $table->google_sheet_url]);
+        return response()->json(['google_sheet_url' => $url]);
     }
 
     /**
