@@ -8,6 +8,6 @@
     @vite(['resources/css/app.css', 'resources/js/app.js'])
 </head>
 <body class="min-h-screen bg-zinc-50 text-zinc-900 antialiased">
-    <div id="app" data-user='@json($user)' data-error='@json($error)'></div>
+    <div id="app" data-user='@json($user)' data-error='@json($error)' data-page='@json($page)'></div>
 </body>
 </html>

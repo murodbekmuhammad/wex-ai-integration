@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\AgentController;
 use App\Http\Controllers\AssistantController;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\EmailController;
@@ -7,10 +8,16 @@ use App\Http\Controllers\PdfController;
 use App\Http\Controllers\TableController;
 use Illuminate\Support\Facades\Route;
 
-// The Vue app is a single page; the current user (or null) is handed to it on load.
+// Each page is the Vue app; the current user (or null) and the page to show are handed to it on load.
 Route::get('/', fn () => view('app', [
     'user' => auth()->user(),
     'error' => session('error'),
+    'page' => 'agents',
+]));
+Route::get('/workspace', fn () => view('app', [
+    'user' => auth()->user(),
+    'error' => session('error'),
+    'page' => 'workspace',
 ]));
 
 Route::get('/auth/google', [AuthController::class, 'redirect']);
@@ -26,7 +33,9 @@ Route::middleware('auth')->group(function () {
     Route::get('/pdfs/{id}/download', [PdfController::class, 'download'])->whereNumber('id');
     Route::post('/ask', [AssistantController::class, 'ask'])->middleware('throttle:10,1');
     Route::post('/analyze', [AssistantController::class, 'analyze'])->middleware('throttle:10,1');
-    Route::post('/agent', [AssistantController::class, 'agent'])->middleware('throttle:5,1');
+    Route::get('/agents', [AgentController::class, 'index']);
+    Route::post('/agents/{key}/run', [AgentController::class, 'run'])->middleware('throttle:5,1');
+    Route::post('/agent', [AgentController::class, 'task'])->middleware('throttle:5,1');
     Route::get('/tables', [TableController::class, 'index']);
     Route::post('/tables', [TableController::class, 'store'])->middleware('throttle:10,1');
     Route::get('/tables/{id}', [TableController::class, 'show'])->whereNumber('id');

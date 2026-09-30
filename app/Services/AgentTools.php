@@ -58,16 +58,18 @@ class AgentTools
     /**
      * definitions
      *
-     * The tools as Claude sees them. email_sheet_link is only offered when
-     * agent email is turned on.
+     * The tools as Claude sees them, optionally only the named ones.
+     * email_sheet_link is only offered when agent email is turned on.
      *
+     * @param array<int, string>|null $only tool names to offer; every tool when null
      * @return array<int, array<string, mixed>>
      */
-    public function definitions(): array
+    public function definitions(?array $only = null): array
     {
         return array_values(array_filter(
             $this->allDefinitions(),
-            fn (array $tool) => $tool['name'] !== 'email_sheet_link' || self::canEmail(),
+            fn (array $tool) => ($tool['name'] !== 'email_sheet_link' || self::canEmail())
+                && ($only === null || in_array($tool['name'], $only, true)),
         ));
     }
 

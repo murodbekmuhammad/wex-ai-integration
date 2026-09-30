@@ -60,11 +60,15 @@ class ReportAgent
      *
      * @param User $user
      * @param string $task what the user wants done
+     * @param array<int, string>|null $tools names of the tools Claude may use; every tool when null
      * @return Generator<int, string>
      * @throws APIException
      */
-    public function run(User $user, string $task): Generator
+    public function run(User $user, string $task, ?array $tools = null): Generator
     {
+        $definitions = $this->tools->definitions($tools);
+        $allowed = array_column($definitions, 'name');
+
         $messages = [[
             'role' => 'user',
             'content' => sprintf(
@@ -76,7 +80,7 @@ class ReportAgent
         ]];
 
         for ($turn = 0; $turn < self::MAX_TURNS; $turn++) {
-            $response = $this->send($messages);
+            $response = $this->send($messages, $definitions);
             $messages[] = ['role' => 'assistant', 'content' => $response->content];
 
             if ($response->stopReason !== 'tool_use') {
@@ -94,7 +98,9 @@ class ReportAgent
 
                 yield '▸ '.$this->tools->label($block->name)."\n";
 
-                $result = $this->tools->run($user, $block->name, (array) $block->input);
+                $result = in_array($block->name, $allowed, true)
+                    ? $this->tools->run($user, $block->name, (array) $block->input)
+                    : ['content' => "The tool {$block->name} isn't available for this task.", 'is_error' => true, 'progress' => "Skipped {$block->name}: not available for this task."];
 
                 yield '  '.$result['progress']."\n";
 
@@ -118,10 +124,11 @@ class ReportAgent
      * One call to Claude with the conversation so far.
      *
      * @param array<int, array<string, mixed>> $messages
+     * @param array<int, array<string, mixed>> $tools tool definitions Claude may use
      * @return BetaMessage
      * @throws APIException
      */
-    protected function send(array $messages): BetaMessage
+    protected function send(array $messages, array $tools): BetaMessage
     {
         $client = new Client(apiKey: config('services.anthropic.key'));
 
@@ -129,7 +136,7 @@ class ReportAgent
             model: self::MODEL,
             maxTokens: 16000,
             system: [['type' => 'text', 'text' => self::INSTRUCTIONS]],
-            tools: $this->tools->definitions(),
+            tools: $tools,
             messages: $messages,
             // If Claude Opus 5.5 declines for policy reasons, the API retries on its default fallback model.
             fallbacks: 'default',
