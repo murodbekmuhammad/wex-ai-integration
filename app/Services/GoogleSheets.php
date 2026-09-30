@@ -77,17 +77,10 @@ class GoogleSheets
      */
     public function upload(User $user, string $name, string $xlsx): array
     {
-        $boundary = Str::random(32);
-        $metadata = json_encode(['name' => $name, 'mimeType' => self::SHEET_MIME_TYPE]);
-
-        $body = "--{$boundary}\r\n"
-            ."Content-Type: application/json; charset=UTF-8\r\n\r\n{$metadata}\r\n"
-            ."--{$boundary}\r\n"
-            .'Content-Type: '.self::XLSX_MIME_TYPE."\r\n\r\n{$xlsx}\r\n"
-            ."--{$boundary}--";
+        [$body, $type] = $this->multipart(['name' => $name, 'mimeType' => self::SHEET_MIME_TYPE], $xlsx);
 
         $response = Http::withToken($this->google->accessToken($user))
-            ->withBody($body, "multipart/related; boundary={$boundary}")
+            ->withBody($body, $type)
             ->post(self::UPLOAD_URL.'?uploadType=multipart&fields=id,webViewLink');
 
         $this->guardAccess($response);
@@ -95,6 +88,59 @@ class GoogleSheets
         $file = $response->throw()->json();
 
         return ['id' => $file['id'], 'url' => $file['webViewLink']];
+    }
+
+    /**
+     * replace
+     *
+     * Replace the contents of a Google Sheet the app uploaded before with a
+     * new workbook, keeping its id, link and sharing.
+     *
+     * @param User $user
+     * @param string $fileId
+     * @param string $name the sheet's title
+     * @param string $xlsx the new workbook's bytes
+     * @return array{id: string, url: string}
+     * @throws AuthenticationException when Google no longer accepts the user's tokens
+     * @throws AuthorizationException when the user hasn't granted Google Drive access
+     * @throws RequestException
+     */
+    public function replace(User $user, string $fileId, string $name, string $xlsx): array
+    {
+        [$body, $type] = $this->multipart(['name' => $name], $xlsx);
+
+        $response = Http::withToken($this->google->accessToken($user))
+            ->withBody($body, $type)
+            ->patch(self::UPLOAD_URL.'/'.rawurlencode($fileId).'?uploadType=multipart&fields=id,webViewLink');
+
+        $this->guardAccess($response);
+
+        $file = $response->throw()->json();
+
+        return ['id' => $file['id'], 'url' => $file['webViewLink']];
+    }
+
+    /**
+     * export
+     *
+     * Download a Google Sheet the app uploaded before as an .xlsx workbook,
+     * including whatever people have typed into it since.
+     *
+     * @param User $user
+     * @param string $fileId
+     * @return string the workbook's bytes
+     * @throws AuthenticationException when Google no longer accepts the user's tokens
+     * @throws AuthorizationException when the user hasn't granted Google Drive access
+     * @throws RequestException
+     */
+    public function export(User $user, string $fileId): string
+    {
+        $response = Http::withToken($this->google->accessToken($user))
+            ->get(self::FILES_URL.'/'.rawurlencode($fileId).'/export', ['mimeType' => self::XLSX_MIME_TYPE]);
+
+        $this->guardAccess($response);
+
+        return $response->throw()->body();
     }
 
     /**
@@ -122,6 +168,29 @@ class GoogleSheets
         $this->guardAccess($response);
 
         return ! $response->throw()->json('trashed');
+    }
+
+    /**
+     * multipart
+     *
+     * A Drive multipart upload body: the file's metadata, then the workbook.
+     *
+     * @param array<string, string> $metadata
+     * @param string $xlsx
+     * @return array{0: string, 1: string} the body and its content type
+     */
+    private function multipart(array $metadata, string $xlsx): array
+    {
+        $boundary = Str::random(32);
+        $json = json_encode($metadata);
+
+        $body = "--{$boundary}\r\n"
+            ."Content-Type: application/json; charset=UTF-8\r\n\r\n{$json}\r\n"
+            ."--{$boundary}\r\n"
+            .'Content-Type: '.self::XLSX_MIME_TYPE."\r\n\r\n{$xlsx}\r\n"
+            ."--{$boundary}--";
+
+        return [$body, "multipart/related; boundary={$boundary}"];
     }
 
     /**

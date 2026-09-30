@@ -55,16 +55,19 @@ class ReportAgent
     /**
      * run
      *
-     * Carry out the task, yielding progress lines and finally Claude's
-     * summary as they happen.
+     * Carry out the task, yielding events as they happen: "thinking" while
+     * Claude picks the next step, "step" when a tool starts, "result" when
+     * it finishes (with a link when it created a sheet), and finally
+     * "summary", or "stopped" when the turn limit is reached.
      *
      * @param User $user
      * @param string $task what the user wants done
      * @param array<int, string>|null $tools names of the tools Claude may use; every tool when null
-     * @return Generator<int, string>
+     * @param string|null $agentKey the configured agent being run, whose report goes to its own Google Sheet
+     * @return Generator<int, array{type: string, tool?: string, label?: string, ok?: bool, text?: string, link?: string|null}>
      * @throws APIException
      */
-    public function run(User $user, string $task, ?array $tools = null): Generator
+    public function run(User $user, string $task, ?array $tools = null, ?string $agentKey = null): Generator
     {
         $definitions = $this->tools->definitions($tools);
         $allowed = array_column($definitions, 'name');
@@ -80,11 +83,13 @@ class ReportAgent
         ]];
 
         for ($turn = 0; $turn < self::MAX_TURNS; $turn++) {
+            yield ['type' => 'thinking'];
+
             $response = $this->send($messages, $definitions);
             $messages[] = ['role' => 'assistant', 'content' => $response->content];
 
             if ($response->stopReason !== 'tool_use') {
-                yield $this->finalText($response);
+                yield ['type' => 'summary', 'text' => $this->finalText($response)];
 
                 return;
             }
@@ -96,13 +101,19 @@ class ReportAgent
                     continue;
                 }
 
-                yield '▸ '.$this->tools->label($block->name)."\n";
+                yield ['type' => 'step', 'tool' => $block->name, 'label' => $this->tools->label($block->name)];
 
                 $result = in_array($block->name, $allowed, true)
-                    ? $this->tools->run($user, $block->name, (array) $block->input)
+                    ? $this->tools->run($user, $block->name, (array) $block->input, $agentKey)
                     : ['content' => "The tool {$block->name} isn't available for this task.", 'is_error' => true, 'progress' => "Skipped {$block->name}: not available for this task."];
 
-                yield '  '.$result['progress']."\n";
+                yield [
+                    'type' => 'result',
+                    'tool' => $block->name,
+                    'ok' => ! $result['is_error'],
+                    'text' => $result['progress'],
+                    'link' => $result['link'] ?? null,
+                ];
 
                 $results[] = [
                     'type' => 'tool_result',
@@ -115,7 +126,7 @@ class ReportAgent
             $messages[] = ['role' => 'user', 'content' => $results];
         }
 
-        yield "\nStopped after ".self::MAX_TURNS.' steps without finishing. Try a more specific task.';
+        yield ['type' => 'stopped', 'text' => 'Stopped after '.self::MAX_TURNS.' steps without finishing. Try a more specific task.'];
     }
 
     /**
@@ -161,7 +172,7 @@ class ReportAgent
             ->map(fn (BetaTextBlock $block) => $block->text)
             ->implode('');
 
-        return "\n".match ($response->stopReason) {
+        return match ($response->stopReason) {
             'refusal' => 'Claude declined to carry out this task.',
             'max_tokens' => trim($text)."\n\n(The answer was cut off because it got too long.)",
             default => trim($text),

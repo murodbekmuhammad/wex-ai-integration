@@ -53,6 +53,48 @@ abstract class Controller
     }
 
     /**
+     * streamEvents
+     *
+     * Stream a generator of events back to the browser as newline-delimited
+     * JSON, one event per line. A Claude failure becomes a final "error"
+     * event.
+     *
+     * @param Closure(): iterable<int, array<string, mixed>> $events
+     * @param int|null $timeLimit seconds the stream may take; the usual Claude time limit when null
+     * @return StreamedResponse
+     */
+    protected function streamEvents(Closure $events, ?int $timeLimit = null): StreamedResponse
+    {
+        return response()->stream(function () use ($events, $timeLimit) {
+            set_time_limit($timeLimit ?? config('services.anthropic.time_limit'));
+
+            $send = function (array $event): void {
+                echo json_encode($event, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)."\n";
+                if (ob_get_level() > 0) {
+                    ob_flush();
+                }
+                flush();
+            };
+
+            try {
+                foreach ($events() as $event) {
+                    $send($event);
+                }
+            } catch (APIException $e) {
+                if (ClaudeErrors::shouldReport($e)) {
+                    report($e);
+                }
+
+                $send(['type' => 'error', 'text' => ClaudeErrors::describe($e)]);
+            }
+        }, 200, [
+            'Content-Type' => 'application/x-ndjson; charset=utf-8',
+            'Cache-Control' => 'no-cache',
+            'X-Accel-Buffering' => 'no',
+        ]);
+    }
+
+    /**
      * notConfigured
      *
      * The answer when no Claude API key is set.

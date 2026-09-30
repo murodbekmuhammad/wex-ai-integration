@@ -18,7 +18,7 @@ use Illuminate\Support\Str;
  *
  * A table Claude built from the user's collected PDFs.
  */
-#[Fillable(['title', 'request', 'summary', 'columns', 'rows', 'warnings', 'pdf_document_ids', 'google_sheet_id', 'google_sheet_url'])]
+#[Fillable(['title', 'request', 'summary', 'columns', 'rows', 'warnings', 'pdf_document_ids', 'google_sheet_id', 'google_sheet_url', 'report_key'])]
 #[Hidden(['user_id'])]
 class ReportTable extends Model
 {

@@ -51,3 +51,24 @@ export async function apiStream(url, body, onText) {
         onText(decoder.decode(value, { stream: true }));
     }
 }
+
+// POST and read a newline-delimited JSON stream, calling onEvent with each parsed event as it arrives.
+export async function apiEvents(url, body, onEvent) {
+    let buffer = '';
+
+    const flush = (final) => {
+        const lines = buffer.split('\n');
+        buffer = final ? '' : lines.pop();
+
+        for (const line of lines) {
+            if (line.trim()) onEvent(JSON.parse(line));
+        }
+    };
+
+    await apiStream(url, body, (text) => {
+        buffer += text;
+        flush(false);
+    });
+
+    flush(true);
+}

@@ -1,13 +1,13 @@
 <script setup>
 import { useAgentRun } from '../useAgentRun';
-import AgentResult from './AgentResult.vue';
+import AgentTimeline from './AgentTimeline.vue';
 import Icon from './Icon.vue';
 import Spinner from './Spinner.vue';
 
 const props = defineProps({ agent: Object });
 const emit = defineEmits(['unauthorized']);
 
-const { log, running, error, sheetUrl, start } = useAgentRun(() => emit('unauthorized'));
+const { steps, planning, summary, notice, sheetUrl, running, error, elapsed, now, hasActivity, start } = useAgentRun(() => emit('unauthorized'));
 
 const run = () => start(`/agents/${props.agent.key}/run`);
 </script>
@@ -27,8 +27,8 @@ const run = () => start(`/agents/${props.agent.key}/run`);
         <div class="flex items-center gap-3 border-t border-zinc-950/5 px-5 py-3 sm:px-6">
             <p class="mr-auto text-xs text-zinc-500">
                 <template v-if="running">Working… this usually takes about a minute.</template>
-                <template v-else-if="sheetUrl">Finished. Run again for a fresh report.</template>
-                <template v-else>Creates a new Google Sheet each run.</template>
+                <template v-else-if="hasActivity">Run again to refresh the report.</template>
+                <template v-else>The Google Sheet link appears here when it’s ready.</template>
             </p>
             <button @click="run" :disabled="running" class="btn btn-ai">
                 <Spinner v-if="running" class="size-4" />
@@ -42,7 +42,8 @@ const run = () => start(`/agents/${props.agent.key}/run`);
             <span>{{ error }}</span>
         </div>
 
-        <AgentResult v-if="(running || log) && !error" class="border-t border-zinc-950/5 px-5 py-5 sm:px-6"
-                     :log="log" :running="running" :sheet-url="sheetUrl" />
+        <AgentTimeline v-if="hasActivity && !error" class="border-t border-zinc-950/5 bg-zinc-50/40 px-5 py-5 sm:px-6"
+                       :steps="steps" :planning="planning" :summary="summary" :notice="notice" :sheet-url="sheetUrl"
+                       :running="running" :elapsed="elapsed" :now="now" />
     </article>
 </template>

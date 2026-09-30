@@ -14,7 +14,7 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
  * @package App\Http\Controllers
  *
  * Lists the agents from config/agents.php and runs them, streaming each step
- * and the agent's summary back as plain text.
+ * and the agent's summary back as newline-delimited JSON events.
  */
 class AgentController extends Controller
 {
@@ -44,7 +44,8 @@ class AgentController extends Controller
     /**
      * run
      *
-     * Run one of the configured agents with its fixed task and tools.
+     * Run one of the configured agents with its fixed task and tools. Its
+     * report goes to the agent's own Google Sheet, updated on every run.
      *
      * @param Request $request
      * @param string $key an agent key from config/agents.php
@@ -60,8 +61,8 @@ class AgentController extends Controller
             return $this->notConfigured();
         }
 
-        return $this->streamText(
-            fn () => $this->agent->run($request->user(), $agent['task'], $agent['tools']),
+        return $this->streamEvents(
+            fn () => $this->agent->run($request->user(), $agent['task'], $agent['tools'], $key),
             config('services.anthropic.agent_time_limit'),
         );
     }
@@ -81,7 +82,7 @@ class AgentController extends Controller
             return $this->notConfigured();
         }
 
-        return $this->streamText(
+        return $this->streamEvents(
             fn () => $this->agent->run($request->user(), $request->validated('task')),
             config('services.anthropic.agent_time_limit'),
         );

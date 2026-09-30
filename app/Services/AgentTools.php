@@ -5,7 +5,9 @@ namespace App\Services;
 use Anthropic\Core\Exceptions\APIException;
 use App\Mail\TableSheetLink;
 use App\Models\PdfDocument;
+use App\Models\ReportTable;
 use App\Models\User;
+use Closure;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Http\Client\RequestException;
@@ -105,7 +107,7 @@ class AgentTools
             ],
             [
                 'name' => 'create_aging_report',
-                'description' => 'Create the factoring aging report as a new Google Sheet from an invoice aging PDF: DASH BOARD, AGING, Aging 1+/30+/45+/60+/90+ and a per-broker "data" tab. The PDF is read by code and checked against its grand total, so the figures are exact. Uses the newest invoice aging PDF unless a document_id is given. Returns the table id to email, the sheet link and the headline figures.',
+                'description' => 'Create or update the factoring aging report Google Sheet from an invoice aging PDF: DASH BOARD, AGING, Aging 1+/30+/45+/60+/90+ and a per-broker "data" tab. The same sheet is updated on every run, keeping the team\'s notes. The PDF is read by code and checked against its grand total, so the figures are exact. Uses the newest invoice aging PDF unless a document_id is given. Returns the table id to email, the sheet link and the headline figures.',
                 'inputSchema' => [
                     'type' => 'object',
                     'properties' => [
@@ -177,7 +179,7 @@ class AgentTools
     {
         return match ($name) {
             'collect_pdfs' => 'Collecting new PDFs from Gmail…',
-            'create_aging_report' => 'Reading the aging report and creating the Google Sheet…',
+            'create_aging_report' => 'Reading the aging report and updating the Google Sheet…',
             'find_pdfs' => 'Finding PDFs…',
             'build_table' => 'Reading the PDFs and building the table…',
             'upload_to_google_sheets' => 'Uploading to Google Sheets…',
@@ -195,14 +197,15 @@ class AgentTools
      * @param User $user
      * @param string $name
      * @param array<string, mixed> $input
-     * @return array{content: string, is_error: bool, progress: string} content goes back to Claude, progress to the user
+     * @param string|null $agentKey the agent running the tool (config/agents.php); its report always goes to the same Google Sheet
+     * @return array{content: string, is_error: bool, progress: string, link?: string} content goes back to Claude; progress, and the link to a created sheet, go to the user
      */
-    public function run(User $user, string $name, array $input): array
+    public function run(User $user, string $name, array $input, ?string $agentKey = null): array
     {
         try {
             return match ($name) {
                 'collect_pdfs' => $this->collectPdfs($user, $input),
-                'create_aging_report' => $this->createAgingReport($user, $input),
+                'create_aging_report' => $this->createAgingReport($user, $input, $agentKey),
                 'find_pdfs' => $this->findPdfs($user, $input),
                 'build_table' => $this->buildTable($user, $input),
                 'upload_to_google_sheets' => $this->uploadToGoogleSheets($user, $input),
@@ -260,15 +263,17 @@ class AgentTools
     /**
      * createAgingReport
      *
-     * Read an invoice aging PDF in code, build the factoring workbook from
-     * it, upload it as a new Google Sheet and save it with the user's tables.
+     * Read an invoice aging PDF in code and build the factoring workbook
+     * from it, then publish it to the agent's Google Sheet (see
+     * publishReport), keeping what the team typed into it.
      *
      * @param User $user
      * @param array<string, mixed> $input
-     * @return array{content: string, is_error: bool, progress: string}
+     * @param string|null $agentKey
+     * @return array{content: string, is_error: bool, progress: string, link: string}
      * @throws AgentToolException
      */
-    private function createAgingReport(User $user, array $input): array
+    private function createAgingReport(User $user, array $input, ?string $agentKey): array
     {
         $input = $this->validate($input, ['document_id' => ['nullable', 'integer']]);
 
@@ -288,20 +293,19 @@ class AgentTools
         }
 
         $asOf = $report['as_of'] ? now()->parse($report['as_of'])->format('M j, Y') : $document->sent_at->format('M j, Y');
-        $title = trim("Aging report {$report['client']}").", as of {$asOf}";
+        $sheetName = trim("Aging report {$report['client']}");
+        $title = "{$sheetName}, as of {$asOf}";
         $summary = $this->workbook->summary($report);
 
-        try {
-            $sheet = $this->sheets->upload($user, $title, $this->workbook->build($report));
-        } catch (AuthenticationException|AuthorizationException $e) {
-            throw new AgentToolException($e->getMessage());
-        } catch (RequestException $e) {
-            report($e);
+        [$sheet, $table] = $this->publishReport(
+            $user,
+            $agentKey,
+            $sheetName,
+            fn (?string $previous) => $this->workbook->build($report, $previous),
+        );
+        $updated = $table->exists;
 
-            throw new AgentToolException('Google Drive could not take the file right now.');
-        }
-
-        $table = $user->reportTables()->create([
+        $table->fill([
             'title' => $title,
             'request' => "Aging report from {$document->filename}",
             'summary' => sprintf('%d invoices from %d brokers, open balance $%s.', $summary['invoices'], $summary['brokers'], number_format($summary['balance'], 2)),
@@ -314,18 +318,67 @@ class AgentTools
             'pdf_document_ids' => [$document->id],
             'google_sheet_id' => $sheet['id'],
             'google_sheet_url' => $sheet['url'],
-        ]);
+        ])->save();
+
+        $verb = $updated ? 'Updated' : 'Created';
 
         return [
             'content' => $this->json([
                 'table_id' => $table->id,
+                'sheet' => $updated ? 'updated the existing sheet' : 'created a new sheet',
                 'google_sheet_url' => $sheet['url'],
                 'source' => ['filename' => $document->filename, 'factor' => $report['factor'], 'report' => $report['title'], 'as_of' => $report['as_of']],
                 ...$summary,
             ]),
             'is_error' => false,
-            'progress' => sprintf('Created “%s” (%d invoices, $%s open): %s', $title, $summary['invoices'], number_format($summary['balance'], 2), $sheet['url']),
+            'progress' => sprintf('%s “%s”: %d invoices, $%s open.', $verb, $sheetName, $summary['invoices'], number_format($summary['balance'], 2)),
+            'link' => $sheet['url'],
         ];
+    }
+
+    /**
+     * publishReport
+     *
+     * Put a report workbook in Google Sheets. Each agent has one sheet: the
+     * first run creates it, and later runs replace its contents in place, so
+     * the link stays the same. The build callback gets the sheet's current
+     * contents to carry the team's edits over. Without an agent (a custom
+     * task), or when the agent's sheet was deleted, a new sheet is created.
+     *
+     * @param User $user
+     * @param string|null $agentKey
+     * @param string $sheetName
+     * @param Closure(string|null): string $build returns the workbook's .xlsx bytes, given the current sheet's bytes or null
+     * @return array{0: array{id: string, url: string}, 1: ReportTable} the sheet, and the agent's saved table (unsaved when new)
+     * @throws AgentToolException
+     */
+    private function publishReport(User $user, ?string $agentKey, string $sheetName, Closure $build): array
+    {
+        $existing = $agentKey === null ? null : $user->reportTables()
+            ->where('report_key', $agentKey)
+            ->whereNotNull('google_sheet_id')
+            ->latest('updated_at')
+            ->orderByDesc('id')
+            ->first();
+
+        try {
+            if ($existing && $this->sheets->exists($user, $existing->google_sheet_id)) {
+                $previous = $this->sheets->export($user, $existing->google_sheet_id);
+                $sheet = $this->sheets->replace($user, $existing->google_sheet_id, $sheetName, $build($previous));
+
+                return [$sheet, $existing];
+            }
+
+            $sheet = $this->sheets->upload($user, $sheetName, $build(null));
+        } catch (AuthenticationException|AuthorizationException $e) {
+            throw new AgentToolException($e->getMessage());
+        } catch (RequestException $e) {
+            report($e);
+
+            throw new AgentToolException('Google Drive could not take the file right now.');
+        }
+
+        return [$sheet, $user->reportTables()->make(['report_key' => $agentKey])];
     }
 
     /**
@@ -435,7 +488,7 @@ class AgentTools
      *
      * @param User $user
      * @param array<string, mixed> $input
-     * @return array{content: string, is_error: bool, progress: string}
+     * @return array{content: string, is_error: bool, progress: string, link: string}
      * @throws AgentToolException
      */
     private function uploadToGoogleSheets(User $user, array $input): array
@@ -456,7 +509,8 @@ class AgentTools
         return [
             'content' => $this->json(['google_sheet_url' => $url]),
             'is_error' => false,
-            'progress' => "Uploaded: {$url}",
+            'progress' => 'Uploaded to Google Sheets.',
+            'link' => $url,
         ];
     }
 

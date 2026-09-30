@@ -14,7 +14,7 @@
 return [
     'invoice_aging' => [
         'name' => 'Invoice aging agent',
-        'description' => 'Collects new PDFs from Gmail and turns the newest invoice aging report into the factoring Google Sheet: dashboard, aging list, 1+ to 90+ tabs and a broker summary.',
+        'description' => 'Collects new PDFs from Gmail and turns the newest invoice aging report into your factoring Google Sheet: dashboard, aging list, 1+ to 90+ tabs and a broker summary. Each run updates the same sheet and keeps your team’s notes.',
         'task' => 'Collect new PDFs from Gmail and create the aging report Google Sheet from the newest invoice aging report.',
         'tools' => ['collect_pdfs', 'find_pdfs', 'create_aging_report'],
     ],

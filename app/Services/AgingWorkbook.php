@@ -6,6 +6,7 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
 use PhpOffice\PhpSpreadsheet\Cell\DataType;
+use PhpOffice\PhpSpreadsheet\IOFactory;
 use PhpOffice\PhpSpreadsheet\Shared\Date;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Style\Alignment;
@@ -44,6 +45,12 @@ class AgingWorkbook
     public const THRESHOLDS = [1, 30, 45, 60, 90];
 
     /**
+     * AGING columns the team fills in by hand. When a sheet is updated they
+     * are carried over from its previous version, matched by invoice number.
+     */
+    public const TEAM_COLUMNS = ['G', 'J', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z', 'AC'];
+
+    /**
      * Tabs placed right after AGING that the aging report has no data for
      * yet, with the team's column headers.
      */
@@ -72,23 +79,36 @@ class AgingWorkbook
     private const HEADER_FILL = '1F3864';
 
     /**
+     * __construct
+     *
+     * @param AgingDashboard $dashboard
+     */
+    public function __construct(private AgingDashboard $dashboard = new AgingDashboard) {}
+
+    /**
      * build
      *
-     * The workbook's .xlsx bytes.
+     * The workbook's .xlsx bytes. When the previous version of the sheet is
+     * given, what the team typed into it is kept: the AGING team columns for
+     * invoices still on the report, and every row of the tabs they fill in
+     * by hand.
      *
      * @param array{factor: string|null, title: string|null, client: string|null, as_of: string|null, grand_total: float, invoices: array<int, array<string, mixed>>} $report
+     * @param string|null $previous the previous version's .xlsx bytes, to keep the team's edits
      * @return string
      */
-    public function build(array $report): string
+    public function build(array $report, ?string $previous = null): string
     {
         $spreadsheet = new Spreadsheet;
         $invoices = collect($report['invoices'])->sortByDesc('age')->values();
+        $previousBook = $previous ? $this->load($previous) : null;
+        $notes = $this->teamNotes($previousBook?->getSheetByName('AGING'));
 
-        $this->dashboard($spreadsheet->getActiveSheet(), $report, $invoices);
-        $this->aging($spreadsheet->createSheet(), 'AGING', $invoices, 1);
+        $this->dashboard->build($spreadsheet->getActiveSheet(), $report);
+        $this->aging($spreadsheet->createSheet(), 'AGING', $invoices, 1, $notes);
 
         foreach (self::HEADER_ONLY_TABS_AFTER_AGING as $title => $columns) {
-            $this->headerOnly($spreadsheet->createSheet(), $title, $columns);
+            $this->headerOnly($spreadsheet->createSheet(), $title, $columns, $previousBook?->getSheetByName($title));
         }
 
         foreach (self::THRESHOLDS as $days) {
@@ -99,11 +119,11 @@ class AgingWorkbook
             $sheet->mergeCells('F1:L1');
             $sheet->getStyle('A1:L1')->getFont()->setBold(true)->setSize(12);
             $sheet->getStyle('F1')->getNumberFormat()->setFormatCode(self::MONEY_FORMAT);
-            $this->aging($sheet, "Aging {$days}+", $matching, 2);
+            $this->aging($sheet, "Aging {$days}+", $matching, 2, $notes);
         }
 
         foreach (self::HEADER_ONLY_TABS_AFTER_THRESHOLDS as $title => $columns) {
-            $this->headerOnly($spreadsheet->createSheet(), $title, $columns);
+            $this->headerOnly($spreadsheet->createSheet(), $title, $columns, $previousBook?->getSheetByName($title));
         }
 
         $this->brokers($spreadsheet->createSheet(), $invoices);
@@ -111,7 +131,7 @@ class AgingWorkbook
         $spreadsheet->setActiveSheetIndex(0);
 
         ob_start();
-        (new Xlsx($spreadsheet))->save('php://output');
+        (new Xlsx($spreadsheet))->setIncludeCharts(true)->save('php://output');
 
         return (string) ob_get_clean();
     }
@@ -151,78 +171,6 @@ class AgingWorkbook
     }
 
     /**
-     * dashboard
-     *
-     * @param Worksheet $sheet
-     * @param array<string, mixed> $report
-     * @param Collection<int, array<string, mixed>> $invoices
-     * @return void
-     */
-    private function dashboard(Worksheet $sheet, array $report, Collection $invoices): void
-    {
-        $sheet->setTitle('DASH BOARD');
-        $summary = $this->summary(['invoices' => $invoices->all()]);
-
-        $this->fill($sheet, [
-            [null, 'DASH BOARD'],
-            [],
-            [null, 'Factor', $report['factor']],
-            [null, 'Client', $report['client']],
-            [null, 'As of', $this->excelDate($report['as_of'])],
-            [null, 'Source report', $report['title']],
-            [],
-            [null, 'Invoices', $summary['invoices']],
-            [null, 'Brokers', $summary['brokers']],
-            [null, 'Invoiced $', $summary['invoiced']],
-            [null, 'Paid $', $summary['paid']],
-            [null, 'Open balance $', $summary['balance']],
-        ]);
-        $sheet->mergeCells('B1:H1');
-        $sheet->getStyle('B1')->getFont()->setBold(true)->setSize(18)->getColor()->setRGB('FFFFFF');
-        $sheet->getStyle('B1:H1')->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setRGB(self::HEADER_FILL);
-        $sheet->getStyle('B1')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
-        $sheet->getStyle('B3:B12')->getFont()->setBold(true);
-        $sheet->getStyle('C5')->getNumberFormat()->setFormatCode(self::DATE_FORMAT);
-        $sheet->getStyle('C10:C12')->getNumberFormat()->setFormatCode(self::MONEY_FORMAT);
-
-        $row = 14;
-        $row = $this->dashboardTable($sheet, $row, ['Aging', 'Invoices', 'Amount'], collect($summary['buckets'])
-            ->map(fn (array $bucket, string $label) => [$label, $bucket['invoices'], $bucket['amount']])->values()->all());
-        $row = $this->dashboardTable($sheet, $row + 1, ['Collection Status', 'Amount'], collect($summary['statuses'])
-            ->map(fn (float $amount, string $status) => [$status, $amount])->values()->all());
-        $this->dashboardTable($sheet, $row + 1, ['Top brokers by balance', 'Amount'], collect($summary['top_brokers'])
-            ->map(fn (float $amount, string $broker) => [$broker, $amount])->values()->all());
-
-        $sheet->getColumnDimension('A')->setWidth(3);
-        $sheet->getColumnDimension('B')->setWidth(45);
-        $sheet->getColumnDimension('C')->setWidth(18);
-        $sheet->getColumnDimension('D')->setWidth(18);
-    }
-
-    /**
-     * dashboardTable
-     *
-     * Write a small titled table starting in column B, with money in its
-     * last column.
-     *
-     * @param Worksheet $sheet
-     * @param int $row first row
-     * @param array<int, string> $header
-     * @param array<int, array<int, string|int|float>> $rows
-     * @return int the row after the table
-     */
-    private function dashboardTable(Worksheet $sheet, int $row, array $header, array $rows): int
-    {
-        $last = Coordinate::stringFromColumnIndex(count($header) + 1);
-
-        $this->fill($sheet, array_map(fn (array $cells) => [null, ...$cells], [$header, ...$rows]), $row);
-        $this->styleHeader($sheet, "B{$row}:{$last}{$row}");
-        $sheet->getStyle("{$last}".($row + 1).":{$last}".($row + count($rows)))->getNumberFormat()->setFormatCode(self::MONEY_FORMAT);
-
-        return $row + count($rows) + 1;
-    }
-
-    /**
      * aging
      *
      * Write the invoice list with the team's columns, starting at the given
@@ -232,9 +180,10 @@ class AgingWorkbook
      * @param string $title
      * @param Collection<int, array<string, mixed>> $invoices
      * @param int $headerRow
+     * @param array<string, array<string, array{value: mixed, format: string}>> $notes team columns by invoice number, then column
      * @return void
      */
-    private function aging(Worksheet $sheet, string $title, Collection $invoices, int $headerRow): void
+    private function aging(Worksheet $sheet, string $title, Collection $invoices, int $headerRow, array $notes = []): void
     {
         $sheet->setTitle($title);
 
@@ -259,6 +208,12 @@ class AgingWorkbook
 
         $this->fill($sheet, [self::AGING_COLUMNS, ...$rows], $headerRow);
 
+        foreach ($invoices->values() as $index => $invoice) {
+            foreach ($notes[$invoice['invoice']] ?? [] as $column => $cell) {
+                $this->restore($sheet, $column.($headerRow + 1 + $index), $cell);
+            }
+        }
+
         $lastColumn = Coordinate::stringFromColumnIndex(count(self::AGING_COLUMNS));
         $lastRow = $headerRow + count($rows);
 
@@ -272,6 +227,7 @@ class AgingWorkbook
             $first = $headerRow + 1;
             $sheet->getStyle("D{$first}:D{$lastRow}")->getNumberFormat()->setFormatCode(self::DATE_FORMAT);
             $sheet->getStyle("K{$first}:K{$lastRow}")->getNumberFormat()->setFormatCode(self::DATE_FORMAT);
+            $sheet->getStyle("J{$first}:J{$lastRow}")->getNumberFormat()->setFormatCode(self::DATE_FORMAT);
             $sheet->getStyle("F{$first}:I{$lastRow}")->getNumberFormat()->setFormatCode(self::MONEY_FORMAT);
         }
 
@@ -285,17 +241,30 @@ class AgingWorkbook
     /**
      * headerOnly
      *
-     * A tab with the team's column headers and no rows yet.
+     * A tab with the team's column headers. Its rows are whatever the team
+     * entered in the previous version of the sheet, if any.
      *
      * @param Worksheet $sheet
      * @param string $title
      * @param array<int, string> $columns
+     * @param Worksheet|null $previous the same tab in the previous version
      * @return void
      */
-    private function headerOnly(Worksheet $sheet, string $title, array $columns): void
+    private function headerOnly(Worksheet $sheet, string $title, array $columns, ?Worksheet $previous = null): void
     {
         $sheet->setTitle($title);
         $this->fill($sheet, [$columns]);
+
+        if ($previous) {
+            $lastColumn = Coordinate::columnIndexFromString($previous->getHighestDataColumn());
+
+            foreach (range(2, max(2, $previous->getHighestDataRow())) as $row) {
+                foreach (range(1, $lastColumn) as $column) {
+                    $address = Coordinate::stringFromColumnIndex($column).$row;
+                    $this->restore($sheet, $address, $this->cellOf($previous, $address));
+                }
+            }
+        }
 
         $lastColumn = Coordinate::stringFromColumnIndex(count($columns));
         $this->styleHeader($sheet, "A1:{$lastColumn}1");
@@ -345,6 +314,98 @@ class AgingWorkbook
     }
 
     /**
+     * teamNotes
+     *
+     * What the team typed into the AGING team columns of the previous
+     * version, by invoice number.
+     *
+     * @param Worksheet|null $aging
+     * @return array<string, array<string, array{value: mixed, format: string}>>
+     */
+    private function teamNotes(?Worksheet $aging): array
+    {
+        if (! $aging) {
+            return [];
+        }
+
+        $notes = [];
+
+        foreach (range(2, max(2, $aging->getHighestDataRow())) as $row) {
+            $invoice = trim((string) $aging->getCell("B{$row}")->getValue());
+
+            if ($invoice === '') {
+                continue;
+            }
+
+            foreach (self::TEAM_COLUMNS as $column) {
+                $cell = $this->cellOf($aging, $column.$row);
+
+                if ($cell['value'] !== null && $cell['value'] !== '') {
+                    $notes[$invoice][$column] = $cell;
+                }
+            }
+        }
+
+        return $notes;
+    }
+
+    /**
+     * cellOf
+     *
+     * A cell's raw value (a formula stays a formula) and number format.
+     *
+     * @param Worksheet $sheet
+     * @param string $address
+     * @return array{value: mixed, format: string}
+     */
+    private function cellOf(Worksheet $sheet, string $address): array
+    {
+        return [
+            'value' => $sheet->getCell($address)->getValue(),
+            'format' => $sheet->getStyle($address)->getNumberFormat()->getFormatCode(),
+        ];
+    }
+
+    /**
+     * restore
+     *
+     * Write a cell carried over from the previous version with its format.
+     * These values come from the team's own sheet, so their formulas are kept.
+     *
+     * @param Worksheet $sheet
+     * @param string $address
+     * @param array{value: mixed, format: string} $cell
+     * @return void
+     */
+    private function restore(Worksheet $sheet, string $address, array $cell): void
+    {
+        if ($cell['value'] === null || $cell['value'] === '') {
+            return;
+        }
+
+        $sheet->setCellValue($address, $cell['value']);
+        $sheet->getStyle($address)->getNumberFormat()->setFormatCode($cell['format']);
+    }
+
+    /**
+     * load
+     *
+     * @param string $xlsx workbook bytes
+     * @return Spreadsheet
+     */
+    private function load(string $xlsx): Spreadsheet
+    {
+        $path = tempnam(sys_get_temp_dir(), 'sheet');
+        file_put_contents($path, $xlsx);
+
+        try {
+            return IOFactory::load($path);
+        } finally {
+            unlink($path);
+        }
+    }
+
+    /**
      * paid
      *
      * @param array<string, mixed> $invoice
@@ -359,12 +420,13 @@ class AgingWorkbook
      * payStatus
      *
      * @param array<string, mixed> $invoice
-     * @return string "Paid", "Short paid" or "Unpaid"
+     * @return string "Over paid", "Paid", "Short paid" or "Unpaid"
      */
     private function payStatus(array $invoice): string
     {
         return match (true) {
-            $invoice['balance'] <= 0 => 'Paid',
+            $invoice['balance'] < 0 => 'Over paid',
+            $invoice['balance'] == 0 => 'Paid',
             $this->paid($invoice) > 0 => 'Short paid',
             default => 'Unpaid',
         };

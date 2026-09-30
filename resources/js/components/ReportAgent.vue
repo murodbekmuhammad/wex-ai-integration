@@ -1,7 +1,7 @@
 <script setup>
 import { ref } from 'vue';
 import { useAgentRun } from '../useAgentRun';
-import AgentResult from './AgentResult.vue';
+import AgentTimeline from './AgentTimeline.vue';
 import Icon from './Icon.vue';
 import Spinner from './Spinner.vue';
 
@@ -9,7 +9,7 @@ const emit = defineEmits(['done', 'unauthorized']);
 
 const task = ref('');
 const asked = ref('');
-const { log, running, error, sheetUrl, start } = useAgentRun(() => emit('unauthorized'));
+const { steps, planning, summary, notice, sheetUrl, running, error, elapsed, now, start } = useAgentRun(() => emit('unauthorized'));
 
 async function run() {
     const text = task.value.trim();
@@ -61,7 +61,8 @@ async function run() {
                     <span class="flex size-8 shrink-0 items-center justify-center rounded-full bg-linear-to-br from-violet-500 to-indigo-600 text-white shadow-md shadow-violet-500/30">
                         <Icon name="bolt" class="size-4" />
                     </span>
-                    <AgentResult class="flex-1 pt-1" :log="log" :running="running" :sheet-url="sheetUrl" />
+                    <AgentTimeline class="flex-1 pt-1" :steps="steps" :planning="planning" :summary="summary" :notice="notice"
+                                   :sheet-url="sheetUrl" :running="running" :elapsed="elapsed" :now="now" />
                 </div>
             </div>
         </div>

@@ -57,6 +57,19 @@ onMounted(async () => {
                 <span>{{ error }}</span>
             </div>
 
+            <div v-else-if="!agents.length" class="card flex items-start gap-4 p-5 sm:p-6">
+                <span class="icon-badge bg-amber-50 text-amber-600 ring-amber-600/10">
+                    <Icon name="warning" class="size-5" />
+                </span>
+                <div class="text-sm">
+                    <p class="font-medium text-zinc-950">No agents found</p>
+                    <p class="mt-1 text-zinc-500">
+                        Agents are listed in <code>config/agents.php</code>. If that file is on the server,
+                        refresh the cached config with <code>php artisan config:cache</code> and reload this page.
+                    </p>
+                </div>
+            </div>
+
             <div v-else class="grid animate-fade-up items-start gap-6 lg:grid-cols-2">
                 <AgentCard v-for="agent in agents" :key="agent.key" :agent="agent" @unauthorized="emit('logout')" />
             </div>
