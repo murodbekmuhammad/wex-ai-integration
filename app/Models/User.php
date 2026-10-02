@@ -71,4 +71,16 @@ class User extends Authenticatable
     {
         return $this->hasMany(ReportTable::class);
     }
+
+    /**
+     * agentRuns
+     *
+     * The saved results of this user's agent runs.
+     *
+     * @return HasMany<AgentRun, $this>
+     */
+    public function agentRuns(): HasMany
+    {
+        return $this->hasMany(AgentRun::class);
+    }
 }

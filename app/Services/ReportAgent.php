@@ -64,10 +64,11 @@ class ReportAgent
      * @param string $task what the user wants done
      * @param array<int, string>|null $tools names of the tools Claude may use; every tool when null
      * @param string|null $agentKey the configured agent being run, whose report goes to its own Google Sheet
+     * @param bool $newSheet put the agent's report in a new Google Sheet instead of updating its existing one
      * @return Generator<int, array{type: string, tool?: string, label?: string, ok?: bool, text?: string, link?: string|null}>
      * @throws APIException
      */
-    public function run(User $user, string $task, ?array $tools = null, ?string $agentKey = null): Generator
+    public function run(User $user, string $task, ?array $tools = null, ?string $agentKey = null, bool $newSheet = false): Generator
     {
         $definitions = $this->tools->definitions($tools);
         $allowed = array_column($definitions, 'name');
@@ -104,7 +105,7 @@ class ReportAgent
                 yield ['type' => 'step', 'tool' => $block->name, 'label' => $this->tools->label($block->name)];
 
                 $result = in_array($block->name, $allowed, true)
-                    ? $this->tools->run($user, $block->name, (array) $block->input, $agentKey)
+                    ? $this->tools->run($user, $block->name, (array) $block->input, $agentKey, $newSheet)
                     : ['content' => "The tool {$block->name} isn't available for this task.", 'is_error' => true, 'progress' => "Skipped {$block->name}: not available for this task."];
 
                 yield [

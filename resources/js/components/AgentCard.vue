@@ -1,5 +1,8 @@
 <script setup>
+import { onMounted, ref } from 'vue';
+import { api } from '../api';
 import { useAgentRun } from '../useAgentRun';
+import AgentRuns from './AgentRuns.vue';
 import AgentTimeline from './AgentTimeline.vue';
 import Icon from './Icon.vue';
 import Spinner from './Spinner.vue';
@@ -9,41 +12,83 @@ const emit = defineEmits(['unauthorized']);
 
 const { steps, planning, summary, notice, sheetUrl, running, error, elapsed, now, hasActivity, start } = useAgentRun(() => emit('unauthorized'));
 
-const run = () => start(`/agents/${props.agent.key}/run`);
+// Where the run puts its report: the agent's existing Google Sheet, or a new one.
+const sheet = ref('existing');
+const sheetOptions = [
+    { value: 'existing', label: 'Existing Google Sheet' },
+    { value: 'new', label: 'New Google Sheet' },
+];
+
+const runs = ref([]);
+const runsLoading = ref(true);
+const runsError = ref('');
+
+async function loadRuns() {
+    try {
+        runs.value = (await api('GET', `/agents/${props.agent.key}/runs`)).runs;
+        runsError.value = '';
+    } catch (e) {
+        if (e.status === 401) return emit('unauthorized');
+        runsError.value = e.message;
+    } finally {
+        runsLoading.value = false;
+    }
+}
+
+async function run() {
+    await start(`/agents/${props.agent.key}/run`, { sheet: sheet.value });
+    await loadRuns();
+}
+
+onMounted(loadRuns);
 </script>
 
 <template>
-    <article class="card flex flex-col overflow-hidden">
-        <div class="flex items-start gap-4 p-5 sm:p-6">
-            <span class="icon-badge bg-violet-50 text-violet-600 ring-violet-600/10">
-                <Icon name="table" class="size-5" />
-            </span>
-            <div class="min-w-0 flex-1">
-                <h2 class="font-semibold text-zinc-950">{{ agent.name }}</h2>
-                <p class="mt-1 text-sm text-zinc-500">{{ agent.description }}</p>
-            </div>
-        </div>
-
-        <div class="flex items-center gap-3 border-t border-zinc-950/5 px-5 py-3 sm:px-6">
-            <p class="mr-auto text-xs text-zinc-500">
-                <template v-if="running">Working… this usually takes about a minute.</template>
-                <template v-else-if="hasActivity">Run again to refresh the report.</template>
-                <template v-else>The Google Sheet link appears here when it’s ready.</template>
-            </p>
-            <button @click="run" :disabled="running" class="btn btn-ai">
-                <Spinner v-if="running" class="size-4" />
-                <Icon v-else name="bolt" class="size-4" />
-                {{ running ? 'Running…' : 'Run' }}
+    <div class="space-y-4">
+        <div role="radiogroup" aria-label="Google Sheet to use" class="inline-flex rounded-xl bg-zinc-100 p-1 ring-1 ring-zinc-950/5">
+            <button v-for="option in sheetOptions" :key="option.value" type="button" role="radio"
+                    :aria-checked="sheet === option.value" :disabled="running" @click="sheet = option.value"
+                    class="rounded-lg px-3 py-1.5 text-sm font-medium transition-colors disabled:cursor-not-allowed"
+                    :class="sheet === option.value ? 'bg-white text-zinc-950 shadow-sm ring-1 ring-zinc-950/5' : 'text-zinc-500 hover:text-zinc-800'">
+                {{ option.label }}
             </button>
         </div>
 
-        <div v-if="error" class="mx-5 mb-4 flex gap-3 rounded-xl bg-red-50 p-3.5 text-sm text-red-700 ring-1 ring-red-600/10 sm:mx-6">
-            <Icon name="warning" class="size-5 shrink-0" />
-            <span>{{ error }}</span>
-        </div>
+        <article class="card flex flex-col overflow-hidden">
+            <div class="flex items-start gap-4 p-5 sm:p-6">
+                <span class="icon-badge bg-violet-50 text-violet-600 ring-violet-600/10">
+                    <Icon name="table" class="size-5" />
+                </span>
+                <div class="min-w-0 flex-1">
+                    <h2 class="font-semibold text-zinc-950">{{ agent.name }}</h2>
+                    <p class="mt-1 text-sm text-zinc-500">{{ agent.description }}</p>
+                </div>
+            </div>
 
-        <AgentTimeline v-if="hasActivity && !error" class="border-t border-zinc-950/5 bg-zinc-50/40 px-5 py-5 sm:px-6"
-                       :steps="steps" :planning="planning" :summary="summary" :notice="notice" :sheet-url="sheetUrl"
-                       :running="running" :elapsed="elapsed" :now="now" />
-    </article>
+            <div class="flex items-center gap-3 border-t border-zinc-950/5 px-5 py-3 sm:px-6">
+                <p class="mr-auto text-xs text-zinc-500">
+                    <template v-if="running">Working… this usually takes about a minute.</template>
+                    <template v-else-if="sheet === 'new'">The report goes to a new Google Sheet.</template>
+                    <template v-else-if="hasActivity">Run again to refresh the report.</template>
+                    <template v-else>The Google Sheet link appears here when it’s ready.</template>
+                </p>
+                <button @click="run" :disabled="running" class="btn btn-ai">
+                    <Spinner v-if="running" class="size-4" />
+                    <Icon v-else name="bolt" class="size-4" />
+                    {{ running ? 'Running…' : 'Run' }}
+                </button>
+            </div>
+
+            <div v-if="error" class="mx-5 mb-4 flex gap-3 rounded-xl bg-red-50 p-3.5 text-sm text-red-700 ring-1 ring-red-600/10 sm:mx-6">
+                <Icon name="warning" class="size-5 shrink-0" />
+                <span>{{ error }}</span>
+            </div>
+
+            <AgentTimeline v-if="hasActivity && !error" class="border-t border-zinc-950/5 bg-zinc-50/40 px-5 py-5 sm:px-6"
+                           :steps="steps" :planning="planning" :summary="summary" :notice="notice" :sheet-url="sheetUrl"
+                           :running="running" :elapsed="elapsed" :now="now" />
+        </article>
+
+        <AgentRuns :runs="runs" :loading="runsLoading" :error="runsError" />
+    </div>
 </template>

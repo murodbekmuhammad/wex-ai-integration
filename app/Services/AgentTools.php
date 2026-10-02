@@ -197,15 +197,16 @@ class AgentTools
      * @param User $user
      * @param string $name
      * @param array<string, mixed> $input
-     * @param string|null $agentKey the agent running the tool (config/agents.php); its report always goes to the same Google Sheet
+     * @param string|null $agentKey the agent running the tool (config/agents.php); its report goes to the same Google Sheet
+     * @param bool $newSheet put the agent's report in a new Google Sheet instead of updating its existing one
      * @return array{content: string, is_error: bool, progress: string, link?: string} content goes back to Claude; progress, and the link to a created sheet, go to the user
      */
-    public function run(User $user, string $name, array $input, ?string $agentKey = null): array
+    public function run(User $user, string $name, array $input, ?string $agentKey = null, bool $newSheet = false): array
     {
         try {
             return match ($name) {
                 'collect_pdfs' => $this->collectPdfs($user, $input),
-                'create_aging_report' => $this->createAgingReport($user, $input, $agentKey),
+                'create_aging_report' => $this->createAgingReport($user, $input, $agentKey, $newSheet),
                 'find_pdfs' => $this->findPdfs($user, $input),
                 'build_table' => $this->buildTable($user, $input),
                 'upload_to_google_sheets' => $this->uploadToGoogleSheets($user, $input),
@@ -270,10 +271,11 @@ class AgentTools
      * @param User $user
      * @param array<string, mixed> $input
      * @param string|null $agentKey
+     * @param bool $newSheet
      * @return array{content: string, is_error: bool, progress: string, link: string}
      * @throws AgentToolException
      */
-    private function createAgingReport(User $user, array $input, ?string $agentKey): array
+    private function createAgingReport(User $user, array $input, ?string $agentKey, bool $newSheet): array
     {
         $input = $this->validate($input, ['document_id' => ['nullable', 'integer']]);
 
@@ -300,6 +302,7 @@ class AgentTools
         [$sheet, $table] = $this->publishReport(
             $user,
             $agentKey,
+            $newSheet,
             $sheetName,
             fn (?string $previous) => $this->workbook->build($report, $previous),
         );
@@ -343,18 +346,20 @@ class AgentTools
      * first run creates it, and later runs replace its contents in place, so
      * the link stays the same. The build callback gets the sheet's current
      * contents to carry the team's edits over. Without an agent (a custom
-     * task), or when the agent's sheet was deleted, a new sheet is created.
+     * task), when the user asked for a new sheet, or when the agent's sheet
+     * was deleted, a new sheet is created; later runs then update that one.
      *
      * @param User $user
      * @param string|null $agentKey
+     * @param bool $newSheet
      * @param string $sheetName
      * @param Closure(string|null): string $build returns the workbook's .xlsx bytes, given the current sheet's bytes or null
      * @return array{0: array{id: string, url: string}, 1: ReportTable} the sheet, and the agent's saved table (unsaved when new)
      * @throws AgentToolException
      */
-    private function publishReport(User $user, ?string $agentKey, string $sheetName, Closure $build): array
+    private function publishReport(User $user, ?string $agentKey, bool $newSheet, string $sheetName, Closure $build): array
     {
-        $existing = $agentKey === null ? null : $user->reportTables()
+        $existing = $agentKey === null || $newSheet ? null : $user->reportTables()
             ->where('report_key', $agentKey)
             ->whereNotNull('google_sheet_id')
             ->latest('updated_at')
