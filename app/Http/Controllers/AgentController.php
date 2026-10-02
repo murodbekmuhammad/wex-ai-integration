@@ -5,13 +5,13 @@ namespace App\Http\Controllers;
 use Anthropic\Core\Exceptions\APIException;
 use App\Http\Requests\RunAgentRequest;
 use App\Models\AgentRun;
+use App\Models\AgentSetting;
 use App\Models\User;
 use App\Services\ClaudeErrors;
 use App\Services\ReportAgent;
 use Generator;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Validation\Rule;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
@@ -56,9 +56,10 @@ class AgentController extends Controller
     /**
      * run
      *
-     * Run one of the configured agents with its fixed task and tools. Its
-     * report updates the agent's existing Google Sheet, or goes to a new one
-     * when the request's "sheet" is "new". The result is saved when the run
+     * Run one of the configured agents with its fixed task and tools, the
+     * way the user's agent settings say: its report updates the agent's
+     * existing Google Sheet or goes to a new one, and it reads every invoice
+     * aging PDF or only the picked ones. The result is saved when the run
      * ends.
      *
      * @param Request $request
@@ -71,22 +72,20 @@ class AgentController extends Controller
 
         abort_unless(is_array($agent), 404);
 
-        $sheetMode = $request->validate([
-            'sheet' => ['nullable', Rule::in([AgentRun::SHEET_EXISTING, AgentRun::SHEET_NEW])],
-        ])['sheet'] ?? AgentRun::SHEET_EXISTING;
-
         if (! config('services.anthropic.key')) {
             return $this->notConfigured();
         }
 
         $user = $request->user();
+        $setting = $user->agentSetting ?? new AgentSetting;
+        $sheetMode = $setting->sheet_mode;
 
         return $this->streamEvents(
             fn () => $this->record(
                 $user,
                 $key,
                 $sheetMode,
-                $this->agent->run($user, $agent['task'], $agent['tools'], $key, $sheetMode === AgentRun::SHEET_NEW),
+                $this->agent->run($user, $agent['task'], $agent['tools'], $key, $sheetMode === AgentRun::SHEET_NEW, $setting->pdf_document_ids),
             ),
             config('services.anthropic.agent_time_limit'),
         );

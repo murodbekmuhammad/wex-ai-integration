@@ -9,6 +9,7 @@ const emit = defineEmits(['logout']);
 
 const pages = [
     { key: 'agents', label: 'Agents', href: '/' },
+    { key: 'settings', label: 'Agent settings', href: '/settings' },
     { key: 'workspace', label: 'Workspace', href: '/workspace' },
 ];
 

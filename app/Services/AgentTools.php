@@ -199,14 +199,15 @@ class AgentTools
      * @param array<string, mixed> $input
      * @param string|null $agentKey the agent running the tool (config/agents.php); its report goes to the same Google Sheet
      * @param bool $newSheet put the agent's report in a new Google Sheet instead of updating its existing one
+     * @param array<int, int>|null $documentIds the only invoice aging PDFs the aging report may be built from; any when null
      * @return array{content: string, is_error: bool, progress: string, link?: string} content goes back to Claude; progress, and the link to a created sheet, go to the user
      */
-    public function run(User $user, string $name, array $input, ?string $agentKey = null, bool $newSheet = false): array
+    public function run(User $user, string $name, array $input, ?string $agentKey = null, bool $newSheet = false, ?array $documentIds = null): array
     {
         try {
             return match ($name) {
                 'collect_pdfs' => $this->collectPdfs($user, $input),
-                'create_aging_report' => $this->createAgingReport($user, $input, $agentKey, $newSheet),
+                'create_aging_report' => $this->createAgingReport($user, $input, $agentKey, $newSheet, $documentIds),
                 'find_pdfs' => $this->findPdfs($user, $input),
                 'build_table' => $this->buildTable($user, $input),
                 'upload_to_google_sheets' => $this->uploadToGoogleSheets($user, $input),
@@ -266,25 +267,30 @@ class AgentTools
      *
      * Read an invoice aging PDF in code and build the factoring workbook
      * from it, then publish it to the agent's Google Sheet (see
-     * publishReport), keeping what the team typed into it.
+     * publishReport), keeping what the team typed into it. When the user
+     * picked PDFs in the agent settings, only those are used.
      *
      * @param User $user
      * @param array<string, mixed> $input
      * @param string|null $agentKey
      * @param bool $newSheet
+     * @param array<int, int>|null $documentIds
      * @return array{content: string, is_error: bool, progress: string, link: string}
      * @throws AgentToolException
      */
-    private function createAgingReport(User $user, array $input, ?string $agentKey, bool $newSheet): array
+    private function createAgingReport(User $user, array $input, ?string $agentKey, bool $newSheet, ?array $documentIds = null): array
     {
         $input = $this->validate($input, ['document_id' => ['nullable', 'integer']]);
 
         $document = $user->pdfDocuments()
             ->where('report_type', 'invoice_aging')
-            ->when($input['document_id'] ?? null, fn ($query, $id) => $query->whereKey($id))
+            ->when($documentIds !== null, fn ($query) => $query->whereIn('id', $documentIds))
+            ->when($input['document_id'] ?? null, fn ($query, $id) => $query->where('id', $id))
             ->orderByDesc('sent_at')
             ->orderByDesc('id')
-            ->first() ?? throw new AgentToolException('No invoice aging PDF was found. Collect PDFs first, or pass the id of an invoice aging PDF.');
+            ->first() ?? throw new AgentToolException($documentIds === null
+                ? 'No invoice aging PDF was found. Collect PDFs first, or pass the id of an invoice aging PDF.'
+                : 'None of the invoice aging PDFs the user picked in the agent settings was found. Only those PDFs may be used; the user can pick others on the Agent settings page.');
 
         $contents = $document->contents() ?? throw new AgentToolException("The file {$document->filename} is missing from storage.");
 

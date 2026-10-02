@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 
@@ -82,5 +83,17 @@ class User extends Authenticatable
     public function agentRuns(): HasMany
     {
         return $this->hasMany(AgentRun::class);
+    }
+
+    /**
+     * agentSetting
+     *
+     * How this user's agents run; none saved yet means the defaults.
+     *
+     * @return HasOne<AgentSetting, $this>
+     */
+    public function agentSetting(): HasOne
+    {
+        return $this->hasOne(AgentSetting::class);
     }
 }

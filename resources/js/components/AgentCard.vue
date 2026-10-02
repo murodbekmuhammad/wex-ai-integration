@@ -12,13 +12,6 @@ const emit = defineEmits(['unauthorized']);
 
 const { steps, planning, summary, notice, sheetUrl, running, error, elapsed, now, hasActivity, start } = useAgentRun(() => emit('unauthorized'));
 
-// Where the run puts its report: the agent's existing Google Sheet, or a new one.
-const sheet = ref('existing');
-const sheetOptions = [
-    { value: 'existing', label: 'Existing Google Sheet' },
-    { value: 'new', label: 'New Google Sheet' },
-];
-
 const runs = ref([]);
 const runsLoading = ref(true);
 const runsError = ref('');
@@ -36,7 +29,7 @@ async function loadRuns() {
 }
 
 async function run() {
-    await start(`/agents/${props.agent.key}/run`, { sheet: sheet.value });
+    await start(`/agents/${props.agent.key}/run`);
     await loadRuns();
 }
 
@@ -45,15 +38,6 @@ onMounted(loadRuns);
 
 <template>
     <div class="space-y-4">
-        <div role="radiogroup" aria-label="Google Sheet to use" class="inline-flex rounded-xl bg-zinc-100 p-1 ring-1 ring-zinc-950/5">
-            <button v-for="option in sheetOptions" :key="option.value" type="button" role="radio"
-                    :aria-checked="sheet === option.value" :disabled="running" @click="sheet = option.value"
-                    class="rounded-lg px-3 py-1.5 text-sm font-medium transition-colors disabled:cursor-not-allowed"
-                    :class="sheet === option.value ? 'bg-white text-zinc-950 shadow-sm ring-1 ring-zinc-950/5' : 'text-zinc-500 hover:text-zinc-800'">
-                {{ option.label }}
-            </button>
-        </div>
-
         <article class="card flex flex-col overflow-hidden">
             <div class="flex items-start gap-4 p-5 sm:p-6">
                 <span class="icon-badge bg-violet-50 text-violet-600 ring-violet-600/10">
@@ -68,7 +52,6 @@ onMounted(loadRuns);
             <div class="flex items-center gap-3 border-t border-zinc-950/5 px-5 py-3 sm:px-6">
                 <p class="mr-auto text-xs text-zinc-500">
                     <template v-if="running">Working… this usually takes about a minute.</template>
-                    <template v-else-if="sheet === 'new'">The report goes to a new Google Sheet.</template>
                     <template v-else-if="hasActivity">Run again to refresh the report.</template>
                     <template v-else>The Google Sheet link appears here when it’s ready.</template>
                 </p>

@@ -1,5 +1,6 @@
 <script setup>
 import { ref } from 'vue';
+import AgentSettingsPage from './components/AgentSettingsPage.vue';
 import AgentsPage from './components/AgentsPage.vue';
 import SignIn from './components/SignIn.vue';
 import WorkspacePage from './components/WorkspacePage.vue';
@@ -11,6 +12,7 @@ const user = ref(props.initialUser);
 
 <template>
     <SignIn v-if="!user" :error="error" />
+    <AgentSettingsPage v-else-if="page === 'settings'" :user="user" @logout="user = null" />
     <WorkspacePage v-else-if="page === 'workspace'" :user="user" @logout="user = null" />
     <AgentsPage v-else :user="user" @logout="user = null" />
 </template>

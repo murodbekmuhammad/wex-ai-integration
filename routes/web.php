@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\AgentController;
+use App\Http\Controllers\AgentSettingController;
 use App\Http\Controllers\AssistantController;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\EmailController;
@@ -13,6 +14,11 @@ Route::get('/', fn () => view('app', [
     'user' => auth()->user(),
     'error' => session('error'),
     'page' => 'agents',
+]));
+Route::get('/settings', fn () => view('app', [
+    'user' => auth()->user(),
+    'error' => session('error'),
+    'page' => 'settings',
 ]));
 Route::get('/workspace', fn () => view('app', [
     'user' => auth()->user(),
@@ -36,6 +42,8 @@ Route::middleware('auth')->group(function () {
     Route::get('/agents', [AgentController::class, 'index']);
     Route::post('/agents/{key}/run', [AgentController::class, 'run'])->middleware('throttle:5,1');
     Route::get('/agents/{key}/runs', [AgentController::class, 'runs']);
+    Route::get('/agent-settings', [AgentSettingController::class, 'show']);
+    Route::put('/agent-settings', [AgentSettingController::class, 'update']);
     Route::post('/agent', [AgentController::class, 'task'])->middleware('throttle:5,1');
     Route::get('/tables', [TableController::class, 'index']);
     Route::post('/tables', [TableController::class, 'store'])->middleware('throttle:10,1');
