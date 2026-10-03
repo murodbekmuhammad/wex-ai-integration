@@ -128,7 +128,9 @@ class AgingReportParser
      * date, page number), the page header above the table (factor, "as of"
      * date, title, client) and the column header row itself, which must hold
      * the invoice aging columns. The parser reads every page's footer and
-     * header as one block after that page's rows.
+     * header as one block after that page's rows; a page header line found
+     * anywhere else in the text, such as the client's name, is dropped too,
+     * so it can never be read as a broker.
      *
      * @param string $text
      * @return string
@@ -139,12 +141,17 @@ class AgingReportParser
         $lines = preg_split('/\R/', $text);
         $count = count($lines);
         $rows = [];
+        $pageHeader = [];
 
         for ($i = 0; $i < $count; $i++) {
             if (! preg_match('/^Page\s+(\d+)\s+of\s+\d+/', trim($lines[$i]), $page)) {
                 $rows[] = $lines[$i];
 
                 continue;
+            }
+
+            foreach (array_slice($lines, $i + 1, self::PAGE_HEADER_LINES) as $line) {
+                $pageHeader[trim($line)] = true;
             }
 
             $i += self::PAGE_HEADER_LINES;
@@ -168,7 +175,9 @@ class AgingReportParser
             }
         }
 
-        return implode("\n", $rows);
+        unset($pageHeader['']);
+
+        return implode("\n", array_filter($rows, fn (string $line) => ! isset($pageHeader[trim($line)])));
     }
 
     /**

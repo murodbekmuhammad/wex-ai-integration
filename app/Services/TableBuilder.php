@@ -11,6 +11,7 @@ use Anthropic\Client;
 use Anthropic\Core\Exceptions\APIException;
 use App\Models\PdfDocument;
 use App\Models\ReportTable;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
 
@@ -32,7 +33,7 @@ class TableBuilder
 
         Build the one table the user asks for. It may combine data from several documents: take the figures from each, line them up in shared columns, and calculate anything the user asks for, such as totals, differences or averages. When rows come from different documents, add a "Source" column naming the file each row came from.
 
-        For a document whose report type is invoice_aging, read only the table inside each page's frame: the column header row (Client / Debtor, PO#, Invoice#, Purchase Date, Sch#, Invoice Amount, Paid Date, Balances, Age and the 1-30 to 121+ Days columns) is the table's header, and the rows below it are its data. Never take data from above the column header (factor, client, report title, "as of" date) or from the page footer (printed date, page number), and never put it in the table.
+        For a document whose report type is invoice_aging, read only the table inside each page's frame: the column header row ({invoice_aging_columns}) is the table's header, and the rows below it are its data. Never take data from above the column header (factor, client, report title, "as of" date) or from the page footer (printed date, page number), and never put it in the table.
 
         Put numbers in cells as plain numbers, without thousands separators, currency symbols or units, and put the unit in the column name, e.g. "Revenue (UZS)". Leave a cell null when a document doesn't have that value; never estimate it. If the last row is the sum of the rows above it, set has_total_row to true.
 
@@ -100,7 +101,7 @@ class TableBuilder
         $stream = $client->beta->messages->createStream(
             model: self::MODEL,
             maxTokens: 64000,
-            system: [['type' => 'text', 'text' => self::INSTRUCTIONS]],
+            system: [['type' => 'text', 'text' => $this->instructions()]],
             messages: [['role' => 'user', 'content' => $content]],
             outputConfig: ['format' => ['type' => 'json_schema', 'schema' => self::SCHEMA]],
             // If Claude Opus 5 declines for policy reasons, the API retries on its default fallback model.
@@ -133,6 +134,21 @@ class TableBuilder
         }
 
         return $this->fromJson($json);
+    }
+
+    /**
+     * instructions
+     *
+     * The system prompt, naming the invoice aging header columns from
+     * config/report_types.php.
+     *
+     * @return string
+     */
+    public function instructions(): string
+    {
+        $columns = implode(', ', Arr::flatten(config('report_types.invoice_aging')));
+
+        return str_replace('{invoice_aging_columns}', $columns, self::INSTRUCTIONS);
     }
 
     /**
