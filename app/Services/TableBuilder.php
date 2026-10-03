@@ -32,6 +32,8 @@ class TableBuilder
 
         Build the one table the user asks for. It may combine data from several documents: take the figures from each, line them up in shared columns, and calculate anything the user asks for, such as totals, differences or averages. When rows come from different documents, add a "Source" column naming the file each row came from.
 
+        For a document whose report type is invoice_aging, read only the table inside each page's frame: the column header row (Client / Debtor, PO#, Invoice#, Purchase Date, Sch#, Invoice Amount, Paid Date, Balances, Age and the 1-30 to 121+ Days columns) is the table's header, and the rows below it are its data. Never take data from above the column header (factor, client, report title, "as of" date) or from the page footer (printed date, page number), and never put it in the table.
+
         Put numbers in cells as plain numbers, without thousands separators, currency symbols or units, and put the unit in the column name, e.g. "Revenue (UZS)". Leave a cell null when a document doesn't have that value; never estimate it. If the last row is the sum of the rows above it, set has_total_row to true.
 
         When a current table is given, the user wants it changed: return the whole revised table, not only the changes.

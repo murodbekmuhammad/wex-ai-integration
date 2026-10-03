@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use Exception;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Carbon;
 use Smalot\PdfParser\Parser;
 
@@ -23,6 +24,11 @@ class AgingReportParser
     private const AMOUNT = '-?[\d,]+\.\d{2}';
 
     /**
+     * The page header lines under the footer line: factor, "as of" date, title and client.
+     */
+    private const PAGE_HEADER_LINES = 4;
+
+    /**
      * parsePdf
      *
      * @param string $contents raw PDF bytes
@@ -37,11 +43,10 @@ class AgingReportParser
     /**
      * parse
      *
-     * Read the report's text. Every page repeats a header block (page
-     * number, factor, date, title, client, column names) after its rows; it
-     * is read once for the report details and otherwise skipped, so a
-     * broker's invoices that continue onto the next page stay with that
-     * broker.
+     * Read the report's text. Invoice data comes only from the table area
+     * (see tableArea); the page header is read once for the report details,
+     * which name the sheet but never become rows. A broker's invoices that
+     * continue onto the next page stay with that broker.
      *
      * @param string $text
      * @return array{factor: string|null, title: string|null, client: string|null, as_of: string|null, grand_total: float, invoices: array<int, array{broker: string, invoice: string, load_id: string|null, purchase_date: string, schedule: string, amount: float, paid_date: string|null, balance: float, age: int}>}
@@ -50,7 +55,7 @@ class AgingReportParser
     public function parse(string $text): array
     {
         $header = $this->header($text);
-        $body = preg_replace('/Page\s+\d+\s+of\s+\d+.*?Balances/s', "\n", $text);
+        $body = $this->tableArea($text);
 
         $invoices = [];
         $broker = null;
@@ -112,6 +117,103 @@ class AgingReportParser
         } catch (Exception) {
             throw new AgingReportException('The PDF could not be read.');
         }
+    }
+
+    /**
+     * tableArea
+     *
+     * Only the table inside each page's frame, as marked in
+     * resources/images/invoice_aging_instructor.png: the rows under the
+     * column header. Everything outside it is dropped: the footer (printed
+     * date, page number), the page header above the table (factor, "as of"
+     * date, title, client) and the column header row itself, which must hold
+     * the invoice aging columns. The parser reads every page's footer and
+     * header as one block after that page's rows.
+     *
+     * @param string $text
+     * @return string
+     * @throws AgingReportException when a page's column header is missing or isn't the invoice aging one
+     */
+    private function tableArea(string $text): string
+    {
+        $lines = preg_split('/\R/', $text);
+        $count = count($lines);
+        $rows = [];
+
+        for ($i = 0; $i < $count; $i++) {
+            if (! preg_match('/^Page\s+(\d+)\s+of\s+\d+/', trim($lines[$i]), $page)) {
+                $rows[] = $lines[$i];
+
+                continue;
+            }
+
+            $i += self::PAGE_HEADER_LINES;
+            $labels = [];
+
+            while ($i + 1 < $count && $this->isColumnLabel($lines[$i + 1])) {
+                $labels = [...$labels, ...$this->words($lines[++$i])];
+            }
+
+            $missing = array_filter(
+                $this->columns(),
+                fn (string $column) => array_diff($this->words($column), $labels) !== [],
+            );
+
+            if (! $labels || $missing) {
+                throw new AgingReportException(sprintf(
+                    'The table header on page %d doesn\'t have the invoice aging columns (missing: %s). The report layout may have changed.',
+                    $page[1],
+                    implode(', ', $missing ?: $this->columns()),
+                ));
+            }
+        }
+
+        return implode("\n", $rows);
+    }
+
+    /**
+     * isColumnLabel
+     *
+     * Whether the line is part of the column header: every word in it is a
+     * word of an invoice aging column name, like "Debtor..", "Invoice#" or
+     * "1-30".
+     *
+     * @param string $line
+     * @return bool
+     */
+    private function isColumnLabel(string $line): bool
+    {
+        $words = $this->words($line);
+
+        return $words !== [] && array_diff($words, array_merge(...array_map($this->words(...), $this->columns()))) === [];
+    }
+
+    /**
+     * columns
+     *
+     * The invoice aging column names from config/report_types.php.
+     *
+     * @return array<int, string>
+     */
+    private function columns(): array
+    {
+        return array_map('strval', Arr::flatten(config('report_types.invoice_aging')));
+    }
+
+    /**
+     * words
+     *
+     * The lowercase words of a text, with "#" and "+" as words of their own,
+     * so "Invoice#" and "Invoice #" read the same.
+     *
+     * @param string $text
+     * @return array<int, string>
+     */
+    private function words(string $text): array
+    {
+        preg_match_all('/[a-z0-9]+|[#+]/', mb_strtolower($text), $matches);
+
+        return $matches[0];
     }
 
     /**

@@ -91,8 +91,9 @@ class PdfAnalyst
     /**
      * documentBlocks
      *
-     * Render the PDFs as the document content blocks Claude reads. Files that
-     * have gone missing from disk, and anything past MAX_BYTES, are skipped.
+     * Render the PDFs as the document content blocks Claude reads, each with
+     * its email details and report type. Files that have gone missing from
+     * disk, and anything past MAX_BYTES, are skipped.
      * The last block is cached, so follow-up questions about the same
      * documents don't pay to upload them again.
      *
@@ -122,10 +123,11 @@ class PdfAnalyst
                 ],
                 'title' => $document->filename,
                 'context' => sprintf(
-                    'Emailed by %s on %s. Subject: %s',
+                    'Emailed by %s on %s. Subject: %s%s',
                     $document->sender,
                     $document->sent_at->toDayDateTimeString(),
                     $document->subject ?: '(no subject)',
+                    $document->report_type ? ". Report type: {$document->report_type}" : '',
                 ),
             ];
         }
