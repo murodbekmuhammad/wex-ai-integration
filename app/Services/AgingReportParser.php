@@ -13,9 +13,13 @@ use Smalot\PdfParser\Parser;
  * @package App\Services
  *
  * Reads a factor's "Funded Detail Aging By Days" PDF into invoice rows in
- * code, without Claude. The rows must add up to the report's grand total, so
- * a layout the parser doesn't understand fails loudly instead of producing
- * wrong numbers.
+ * code, without Claude. Only the table inside each page's frame is read, as
+ * marked in resources/images/invoice_aging_instructor.png: the rows under the
+ * column header and above the page footer. The text is placed by its position
+ * on the page, so the page header (factor, client, title, "as of" date) can
+ * never end up among the rows, whatever order the PDF stores it in. The rows
+ * must add up to the report's grand total, so a layout the parser doesn't
+ * understand fails loudly instead of producing wrong numbers.
  */
 class AgingReportParser
 {
@@ -24,9 +28,20 @@ class AgingReportParser
     private const AMOUNT = '-?[\d,]+\.\d{2}';
 
     /**
-     * The page header lines under the footer line: factor, "as of" date, title and client.
+     * How far, in points, the column header's labels reach down from its top
+     * line; its labels are stacked up to three lines high.
      */
-    private const PAGE_HEADER_LINES = 4;
+    private const HEADER_HEIGHT = 30;
+
+    /**
+     * The height of one line of the column header, in points.
+     */
+    private const HEADER_LINE = 10;
+
+    /**
+     * Text this close vertically, in points, is on the same line.
+     */
+    private const LINE_TOLERANCE = 2;
 
     /**
      * parsePdf
@@ -37,31 +52,164 @@ class AgingReportParser
      */
     public function parsePdf(string $contents): array
     {
-        return $this->parse($this->text($contents));
+        return $this->parsePages($this->pages($contents));
     }
 
     /**
-     * parse
+     * parsePages
      *
-     * Read the report's text. Invoice data comes only from the table area
-     * (see tableArea); the page header is read once for the report details,
-     * which name the sheet but never become rows. A broker's invoices that
-     * continue onto the next page stay with that broker.
+     * Read the report from its pages' text. Invoice rows come only from the
+     * table inside each page's frame (see frame); the first page header is
+     * read for the report details, which name the sheet but never become
+     * rows. A broker's invoices that continue onto the next page stay with
+     * that broker.
      *
-     * @param string $text
+     * @param array<int, array<int, array{x: float, y: float, text: string}>> $pages each page's text items, y counted up from the bottom
      * @return array{factor: string|null, title: string|null, client: string|null, as_of: string|null, grand_total: float, invoices: array<int, array{broker: string, invoice: string, load_id: string|null, purchase_date: string, schedule: string, amount: float, paid_date: string|null, balance: float, age: int}>}
-     * @throws AgingReportException when the text isn't an aging report or doesn't add up
+     * @throws AgingReportException when the pages aren't an aging report or don't add up
      */
-    public function parse(string $text): array
+    public function parsePages(array $pages): array
     {
-        $header = $this->header($text);
-        $body = $this->tableArea($text);
+        $details = null;
+        $lines = [];
 
+        foreach (array_values($pages) as $index => $items) {
+            [$pageHeader, $table] = $this->frame($items, $index + 1);
+            $details ??= $this->details($pageHeader);
+            array_push($lines, ...$this->lines($table));
+        }
+
+        return [...($details ?? $this->details([])), ...$this->rows($lines)];
+    }
+
+    /**
+     * pages
+     *
+     * Every page's text items with their position.
+     *
+     * @param string $contents raw PDF bytes
+     * @return array<int, array<int, array{x: float, y: float, text: string}>>
+     * @throws AgingReportException when the PDF can't be read
+     */
+    protected function pages(string $contents): array
+    {
+        try {
+            $pages = (new Parser)->parseContent($contents)->getPages();
+
+            return array_map(fn ($page) => array_map(fn (array $item) => [
+                'x' => (float) $item[0][4],
+                'y' => (float) $item[0][5],
+                'text' => (string) $item[1],
+            ], $page->getDataTm()), $pages);
+        } catch (Exception) {
+            throw new AgingReportException('The PDF could not be read.');
+        }
+    }
+
+    /**
+     * frame
+     *
+     * Split a page into the page header above the column header, and the
+     * table: the items below the column header and above the footer (printed
+     * date, page number). The column header itself belongs to neither, and
+     * must hold the invoice aging columns.
+     *
+     * @param array<int, array{x: float, y: float, text: string}> $items
+     * @param int $page page number, for the error message
+     * @return array{0: array<int, array{x: float, y: float, text: string}>, 1: array<int, array{x: float, y: float, text: string}>} the page header items and the table items
+     * @throws AgingReportException when the page has no invoice aging column header
+     */
+    private function frame(array $items, int $page): array
+    {
+        // Worded labels ("Invoice#", "Days") find the header; number labels ("1-30", "121") may sit a line above them.
+        $worded = array_filter($items, fn (array $item) => $this->isColumnLabel($item['text']) && preg_match('/[a-z]/i', $item['text']));
+        $wordedTop = $worded ? max(array_column($worded, 'y')) : 0;
+        $wordedBottom = $worded ? min(array_filter(array_column($worded, 'y'), fn (float $y) => $y >= $wordedTop - self::HEADER_HEIGHT)) : 0;
+
+        $header = array_filter(
+            $worded ? $items : [],
+            fn (array $item) => $item['y'] >= $wordedBottom - self::LINE_TOLERANCE
+                && $item['y'] <= $wordedTop + self::HEADER_LINE
+                && $this->isColumnLabel($item['text']),
+        );
+        $words = array_merge([], ...array_map(fn (array $item) => $this->words($item['text']), $header));
+        $missing = array_filter($this->columns(), fn (string $column) => array_diff($this->words($column), $words) !== []);
+
+        if (! $header || $missing) {
+            throw new AgingReportException(sprintf(
+                'The table header on page %d doesn\'t have the invoice aging columns (missing: %s). The report layout may have changed.',
+                $page,
+                implode(', ', $missing ?: $this->columns()),
+            ));
+        }
+
+        $top = max(array_column($header, 'y'));
+        $bottom = min(array_column($header, 'y'));
+        $footer = array_filter($items, fn (array $item) => $item['y'] < $bottom && preg_match('/^(Page|Printed:)/', trim($item['text'])));
+        $footerTop = $footer ? max(array_column($footer, 'y')) : -INF;
+
+        return [
+            array_values(array_filter($items, fn (array $item) => $item['y'] > $top + self::LINE_TOLERANCE)),
+            array_values(array_filter($items, fn (array $item) => $item['y'] < $bottom - self::LINE_TOLERANCE && $item['y'] > $footerTop + self::LINE_TOLERANCE)),
+        ];
+    }
+
+    /**
+     * lines
+     *
+     * Put text items back together into lines, top to bottom, with the
+     * items of a line in left-to-right order and separated by tabs.
+     *
+     * @param array<int, array{x: float, y: float, text: string}> $items
+     * @return array<int, string>
+     */
+    private function lines(array $items): array
+    {
+        usort($items, fn (array $a, array $b) => [$b['y'], $a['x']] <=> [$a['y'], $b['x']]);
+
+        $lines = [];
+        $lineY = null;
+
+        foreach ($items as $item) {
+            $text = trim($item['text']);
+
+            if ($text === '') {
+                continue;
+            }
+
+            if ($lineY === null || $lineY - $item['y'] > self::LINE_TOLERANCE) {
+                $lines[] = [];
+                $lineY = $item['y'];
+            }
+
+            $lines[count($lines) - 1][] = $item;
+        }
+
+        return array_map(function (array $line) {
+            usort($line, fn (array $a, array $b) => $a['x'] <=> $b['x']);
+
+            return implode("\t", array_map(fn (array $item) => trim($item['text']), $line));
+        }, $lines);
+    }
+
+    /**
+     * rows
+     *
+     * Read the invoices from the table's lines and check them against the
+     * report's grand total.
+     *
+     * @param array<int, string> $lines
+     * @return array{grand_total: float, invoices: array<int, array{broker: string, invoice: string, load_id: string|null, purchase_date: string, schedule: string, amount: float, paid_date: string|null, balance: float, age: int}>}
+     * @throws AgingReportException when there are no invoices or they don't add up
+     */
+    private function rows(array $lines): array
+    {
         $invoices = [];
         $broker = null;
         $lastWasInvoice = false;
+        $grandTotal = null;
 
-        foreach (preg_split('/\R/', $body) as $line) {
+        foreach ($lines as $line) {
             $line = trim($line);
 
             if ($invoice = $this->invoiceLine($line)) {
@@ -71,7 +219,9 @@ class AgingReportParser
                 continue;
             }
 
-            if ($lastWasInvoice && preg_match('/^[^\s*]+$/', $line)) {
+            if (preg_match('/^Grand(?:\s+Total)?\s+('.self::AMOUNT.')/', $line, $match)) {
+                $grandTotal = $this->number($match[1]);
+            } elseif ($lastWasInvoice && preg_match('/^[^\s*]+$/', $line)) {
                 // The line under an invoice holds its PO#, which is the load id.
                 $invoices[count($invoices) - 1]['load_id'] = $line;
             } elseif (preg_match('/^(.+)\(([^()]+)\)$/', $line, $match)) {
@@ -85,11 +235,10 @@ class AgingReportParser
             throw new AgingReportException('No invoice rows were found. This doesn\'t look like a detail aging report.');
         }
 
-        if (! preg_match('/Grand\s+Total\s+('.self::AMOUNT.')/', $body, $match)) {
+        if ($grandTotal === null) {
             throw new AgingReportException('The report has no grand total to check the invoices against.');
         }
 
-        $grandTotal = $this->number($match[1]);
         $sum = round(array_sum(array_column($invoices, 'balance')), 2);
 
         if (abs($sum - $grandTotal) > 0.005) {
@@ -100,99 +249,45 @@ class AgingReportParser
             ));
         }
 
-        return [...$header, 'grand_total' => $grandTotal, 'invoices' => $invoices];
+        return ['grand_total' => $grandTotal, 'invoices' => $invoices];
     }
 
     /**
-     * text
+     * details
      *
-     * @param string $contents raw PDF bytes
-     * @return string
-     * @throws AgingReportException when the PDF can't be read
+     * The factor, title, client and "as of" date from a page header: the
+     * factor and title on its first line, the client and date on its second.
+     *
+     * @param array<int, array{x: float, y: float, text: string}> $items the page header items
+     * @return array{factor: string|null, title: string|null, client: string|null, as_of: string|null}
      */
-    protected function text(string $contents): string
+    private function details(array $items): array
     {
-        try {
-            return (new Parser)->parseContent($contents)->getText();
-        } catch (Exception) {
-            throw new AgingReportException('The PDF could not be read.');
-        }
-    }
+        $lines = array_map(fn (string $line) => explode("\t", $line), $this->lines($items));
+        $asOf = Arr::first(array_merge([], ...$lines), fn (string $text) => preg_match('/^As Of\s+/', $text));
+        $client = $lines[1][0] ?? null;
 
-    /**
-     * tableArea
-     *
-     * Only the table inside each page's frame, as marked in
-     * resources/images/invoice_aging_instructor.png: the rows under the
-     * column header. Everything outside it is dropped: the footer (printed
-     * date, page number), the page header above the table (factor, "as of"
-     * date, title, client) and the column header row itself, which must hold
-     * the invoice aging columns. The parser reads every page's footer and
-     * header as one block after that page's rows; a page header line found
-     * anywhere else in the text, such as the client's name, is dropped too,
-     * so it can never be read as a broker.
-     *
-     * @param string $text
-     * @return string
-     * @throws AgingReportException when a page's column header is missing or isn't the invoice aging one
-     */
-    private function tableArea(string $text): string
-    {
-        $lines = preg_split('/\R/', $text);
-        $count = count($lines);
-        $rows = [];
-        $pageHeader = [];
-
-        for ($i = 0; $i < $count; $i++) {
-            if (! preg_match('/^Page\s+(\d+)\s+of\s+\d+/', trim($lines[$i]), $page)) {
-                $rows[] = $lines[$i];
-
-                continue;
-            }
-
-            foreach (array_slice($lines, $i + 1, self::PAGE_HEADER_LINES) as $line) {
-                $pageHeader[trim($line)] = true;
-            }
-
-            $i += self::PAGE_HEADER_LINES;
-            $labels = [];
-
-            while ($i + 1 < $count && $this->isColumnLabel($lines[$i + 1])) {
-                $labels = [...$labels, ...$this->words($lines[++$i])];
-            }
-
-            $missing = array_filter(
-                $this->columns(),
-                fn (string $column) => array_diff($this->words($column), $labels) !== [],
-            );
-
-            if (! $labels || $missing) {
-                throw new AgingReportException(sprintf(
-                    'The table header on page %d doesn\'t have the invoice aging columns (missing: %s). The report layout may have changed.',
-                    $page[1],
-                    implode(', ', $missing ?: $this->columns()),
-                ));
-            }
-        }
-
-        unset($pageHeader['']);
-
-        return implode("\n", array_filter($rows, fn (string $line) => ! isset($pageHeader[trim($line)])));
+        return [
+            'factor' => $lines[0][0] ?? null,
+            'title' => isset($lines[0][1]) ? end($lines[0]) : null,
+            'client' => $client !== null && $client !== $asOf ? trim(preg_replace('/\([^()]*\)$/', '', $client)) : null,
+            'as_of' => $asOf ? $this->date(preg_replace('/^As Of\s+/', '', $asOf), 'F j, Y') : null,
+        ];
     }
 
     /**
      * isColumnLabel
      *
-     * Whether the line is part of the column header: every word in it is a
+     * Whether the text is part of the column header: every word in it is a
      * word of an invoice aging column name, like "Debtor..", "Invoice#" or
      * "1-30".
      *
-     * @param string $line
+     * @param string $text
      * @return bool
      */
-    private function isColumnLabel(string $line): bool
+    private function isColumnLabel(string $text): bool
     {
-        $words = $this->words($line);
+        $words = $this->words($text);
 
         return $words !== [] && array_diff($words, array_merge(...array_map($this->words(...), $this->columns()))) === [];
     }
@@ -223,26 +318,6 @@ class AgingReportParser
         preg_match_all('/[a-z0-9]+|[#+]/', mb_strtolower($text), $matches);
 
         return $matches[0];
-    }
-
-    /**
-     * header
-     *
-     * The factor, title, client and "as of" date from the first page header.
-     *
-     * @param string $text
-     * @return array{factor: string|null, title: string|null, client: string|null, as_of: string|null}
-     */
-    private function header(string $text): array
-    {
-        preg_match('/Page\s+\d+\s+of\s+\d+[^\n]*\n\s*(.+?)\s*\n\s*As Of\s+(.+?)\s*\n\s*(.+?)\s*\n\s*(.+?)\s*\n/s', $text, $match);
-
-        return [
-            'factor' => $match[1] ?? null,
-            'title' => $match[3] ?? null,
-            'client' => isset($match[4]) ? trim(preg_replace('/\([^()]*\)$/', '', $match[4])) : null,
-            'as_of' => isset($match[2]) ? $this->date($match[2], 'F j, Y') : null,
-        ];
     }
 
     /**
