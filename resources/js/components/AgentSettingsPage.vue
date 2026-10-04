@@ -21,6 +21,8 @@ const all = ref(true);
 const selected = ref([]);
 
 const loading = ref(true);
+const resyncing = ref(false);
+const resynced = ref(null);
 const saving = ref(false);
 const saved = ref(false);
 const error = ref('');
@@ -56,6 +58,26 @@ async function save() {
         handleError(e);
     } finally {
         saving.value = false;
+    }
+}
+
+// Pull new PDFs from Gmail (the last week, every sender) and refresh the list, keeping any unsaved picks.
+async function resync() {
+    resyncing.value = true;
+    resynced.value = null;
+    error.value = '';
+
+    try {
+        const { collected } = await api('POST', '/pdfs/collect', {});
+        pdfs.value = (await api('GET', '/agent-settings')).pdfs;
+
+        const ids = new Set(pdfs.value.map((pdf) => pdf.id));
+        selected.value = selected.value.filter((id) => ids.has(id));
+        resynced.value = collected;
+    } catch (e) {
+        handleError(e);
+    } finally {
+        resyncing.value = false;
     }
 }
 
@@ -121,11 +143,22 @@ onMounted(async () => {
                         <span class="icon-badge bg-rose-50 text-rose-600 ring-rose-600/10">
                             <Icon name="document" class="size-5" />
                         </span>
-                        <div>
+                        <div class="min-w-0 flex-1">
                             <h2 class="font-semibold text-zinc-950">Invoice aging PDFs</h2>
                             <p class="mt-1 text-sm text-zinc-500">The PDFs from your email the agent may use. It builds the report from the newest of them.</p>
                         </div>
+                        <button type="button" @click="resync" :disabled="resyncing" class="btn btn-secondary shrink-0"
+                                title="Collect new PDFs from the last week of Gmail">
+                            <Spinner v-if="resyncing" class="size-4" />
+                            <Icon v-else name="refresh" class="size-4" />
+                            {{ resyncing ? 'Syncing…' : 'Resync' }}
+                        </button>
                     </div>
+
+                    <p v-if="resynced !== null" class="mx-5 mb-4 rounded-lg px-3 py-2 text-xs ring-1 sm:mx-6"
+                       :class="resynced ? 'bg-emerald-50 text-emerald-700 ring-emerald-600/15' : 'bg-zinc-100 text-zinc-600 ring-zinc-950/5'">
+                        {{ resynced ? `Collected ${resynced} new PDF(s) from Gmail.` : 'No new PDFs in the last week of Gmail.' }}
+                    </p>
 
                     <label class="flex cursor-pointer items-center gap-3 border-t border-zinc-950/5 px-5 py-3 text-sm sm:px-6">
                         <input type="checkbox" v-model="all" @change="saved = false" class="size-4 cursor-pointer rounded accent-violet-600">
