@@ -206,6 +206,7 @@ class AgingReportParser
     {
         $invoices = [];
         $broker = null;
+        $header = [];
         $lastWasInvoice = false;
         $grandTotal = null;
 
@@ -213,6 +214,11 @@ class AgingReportParser
             $line = trim($line);
 
             if ($invoice = $this->invoiceLine($line)) {
+                if ($header) {
+                    $broker = $this->brokerName($header);
+                    $header = null;
+                }
+
                 $invoices[] = ['broker' => $broker ?? 'Unknown', ...$invoice];
                 $lastWasInvoice = true;
 
@@ -224,8 +230,18 @@ class AgingReportParser
             } elseif ($lastWasInvoice && preg_match('/^[^\s*]+$/', $line)) {
                 // The line under an invoice holds its PO#, which is the load id.
                 $invoices[count($invoices) - 1]['load_id'] = $line;
-            } elseif (preg_match('/^(.+)\(([^()]+)\)$/', $line, $match)) {
-                $broker = trim(preg_replace('/\s*\([^()]*@[^()]*\)/', '', $match[1]));
+            } elseif (preg_match('/'.self::AMOUNT.'/', $line)) {
+                // A broker's subtotal line: the next broker's header starts below it.
+                $header = [];
+            } elseif (preg_match('/^\(?\d{3}\)?[\s.-]*\d{3}[\s.-]*\d{4}\b/', $line)) {
+                // The broker's phone numbers follow its header.
+                if ($header) {
+                    $broker = $this->brokerName($header);
+                }
+
+                $header = null;
+            } elseif ($header !== null) {
+                $header[] = $line;
             }
 
             $lastWasInvoice = false;
@@ -250,6 +266,26 @@ class AgingReportParser
         }
 
         return ['grand_total' => $grandTotal, 'invoices' => $invoices];
+    }
+
+    /**
+     * brokerName
+     *
+     * The broker's name from its header lines, e.g. "ALLEN LUND COMPANY INC
+     * (billing@allenlund.com)(AL-LOSANG)", without its debtor code and email.
+     * A long header wraps onto more lines, which can leave the email and
+     * code alone on the last line, so the lines are read together.
+     *
+     * @param array<int, string> $header
+     * @return string|null null when the header holds no name
+     */
+    private function brokerName(array $header): ?string
+    {
+        $name = preg_replace('/\s+/', ' ', str_replace("\t", ' ', implode(' ', $header)));
+        $name = preg_replace('/\s*\([^()]*\)$/', '', trim($name));
+        $name = trim(preg_replace('/\s*\([^()]*@[^()]*\)/', '', $name));
+
+        return $name === '' ? null : $name;
     }
 
     /**
