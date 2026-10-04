@@ -44,7 +44,7 @@ function toggle(id) {
                         <th class="w-10 border-b border-zinc-950/10 py-3 pl-3"><span class="sr-only">Expand</span></th>
                         <th class="w-40 border-b border-zinc-950/10 px-3 py-3 font-medium whitespace-nowrap">Date</th>
                         <th class="w-32 border-b border-zinc-950/10 px-3 py-3 font-medium whitespace-nowrap">Status</th>
-                        <th class="w-60 border-b border-zinc-950/10 px-3 py-3 font-medium whitespace-nowrap">Summary</th>
+                        <th class="border-b border-zinc-950/10 px-3 py-3 font-medium whitespace-nowrap">Summary</th>
                         <th class="w-20 border-b border-zinc-950/10 px-3 py-3 font-medium whitespace-nowrap">Steps</th>
                         <th class="w-28 border-b border-zinc-950/10 px-3 py-3 pr-5 font-medium whitespace-nowrap sm:pr-6">Sheet</th>
                     </tr>

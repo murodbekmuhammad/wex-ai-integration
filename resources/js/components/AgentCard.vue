@@ -37,7 +37,8 @@ onMounted(loadRuns);
 </script>
 
 <template>
-    <div class="space-y-4">
+    <!-- "contents": the card sits in the page's agent grid, and its results span the grid's full width below it. -->
+    <div class="contents">
         <article class="card flex flex-col overflow-hidden">
             <div class="flex items-start gap-4 p-5 sm:p-6">
                 <span class="icon-badge bg-violet-50 text-violet-600 ring-violet-600/10">
@@ -72,6 +73,6 @@ onMounted(loadRuns);
                            :running="running" :elapsed="elapsed" :now="now" />
         </article>
 
-        <AgentRuns :runs="runs" :loading="runsLoading" :error="runsError" />
+        <AgentRuns class="lg:col-span-2" :runs="runs" :loading="runsLoading" :error="runsError" />
     </div>
 </template>
