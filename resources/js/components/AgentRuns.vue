@@ -3,7 +3,16 @@ import { ref } from 'vue';
 import Icon from './Icon.vue';
 import Spinner from './Spinner.vue';
 
-defineProps({ runs: Array, loading: Boolean, error: String });
+const props = defineProps({ runs: Array, agents: Array, filter: String, loading: Boolean, error: String });
+const emit = defineEmits(['update:filter']);
+
+// "Invoice aging agent" → "Invoice aging": the run's type, from its agent.
+const typeName = (agent) => agent.name.replace(/\s+agent$/i, '');
+const typeOf = (run) => {
+    const agent = props.agents.find((candidate) => candidate.key === run.agent_key);
+
+    return agent ? typeName(agent) : run.agent_key;
+};
 
 const statuses = {
     completed: { label: 'Completed', icon: 'check', class: 'bg-emerald-50 text-emerald-700 ring-emerald-600/15' },
@@ -25,7 +34,17 @@ function toggle(id) {
 
 <template>
     <section class="card overflow-hidden">
-        <h3 class="border-b border-zinc-950/5 px-5 py-3 text-sm font-semibold text-zinc-950 sm:px-6">Results</h3>
+        <div class="flex items-center justify-between gap-3 border-b border-zinc-950/5 px-5 py-2.5 sm:px-6">
+            <h3 class="text-sm font-semibold text-zinc-950">Results</h3>
+            <label class="relative">
+                <span class="sr-only">Show results of</span>
+                <select :value="filter" @change="emit('update:filter', $event.target.value)" class="field w-48 appearance-none py-1.5 pr-9 text-sm">
+                    <option value="">All agents</option>
+                    <option v-for="agent in agents" :key="agent.key" :value="agent.key">{{ typeName(agent) }}</option>
+                </select>
+                <Icon name="chevron-up-down" class="pointer-events-none absolute top-1/2 right-3 size-4 -translate-y-1/2 text-zinc-400" />
+            </label>
+        </div>
 
         <div v-if="loading" class="flex items-center gap-2 px-5 py-4 text-sm text-zinc-500 sm:px-6">
             <Spinner class="size-4 text-violet-600" /> Loading results…
@@ -35,7 +54,7 @@ function toggle(id) {
             <Icon name="warning" class="size-5 shrink-0" /> {{ error }}
         </p>
 
-        <p v-else-if="!runs.length" class="px-5 py-4 text-sm text-zinc-500 sm:px-6">No results yet. Each run’s result is saved here.</p>
+        <p v-else-if="!runs.length" class="px-5 py-4 text-sm text-zinc-500 sm:px-6">{{ filter ? 'No results for this agent yet.' : 'No results yet. Each run’s result is saved here.' }}</p>
 
         <div v-else class="scroll-thin overflow-x-auto">
             <table class="w-full table-fixed text-left text-sm">
@@ -43,6 +62,7 @@ function toggle(id) {
                     <tr class="bg-zinc-50/95 text-xs font-medium tracking-wide text-zinc-500 uppercase">
                         <th class="w-10 border-b border-zinc-950/10 py-3 pl-3"><span class="sr-only">Expand</span></th>
                         <th class="w-40 border-b border-zinc-950/10 px-3 py-3 font-medium whitespace-nowrap">Date</th>
+                        <th class="w-36 border-b border-zinc-950/10 px-3 py-3 font-medium whitespace-nowrap">Type</th>
                         <th class="w-32 border-b border-zinc-950/10 px-3 py-3 font-medium whitespace-nowrap">Status</th>
                         <th class="border-b border-zinc-950/10 px-3 py-3 font-medium whitespace-nowrap">Summary</th>
                         <th class="w-20 border-b border-zinc-950/10 px-3 py-3 font-medium whitespace-nowrap">Steps</th>
@@ -60,6 +80,7 @@ function toggle(id) {
                             </button>
                         </td>
                         <td class="px-3 py-2.5 whitespace-nowrap text-zinc-500 tabular-nums">{{ when(run.created_at) }}</td>
+                        <td class="truncate px-3 py-2.5 whitespace-nowrap text-zinc-700">{{ typeOf(run) }}</td>
                         <td class="px-3 py-2.5">
                             <span class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium whitespace-nowrap ring-1" :class="statuses[run.status]?.class">
                                 <Icon :name="statuses[run.status]?.icon || 'bolt'" class="size-3" />
@@ -78,7 +99,7 @@ function toggle(id) {
                     </tr>
 
                     <tr v-if="expanded.has(run.id)" class="bg-zinc-50/60">
-                        <td colspan="6" class="space-y-3 px-5 py-4 sm:px-6">
+                        <td colspan="7" class="space-y-3 px-5 py-4 sm:px-6">
                             <p class="text-xs text-zinc-500">{{ run.sheet_mode === 'new' ? 'New Google Sheet' : 'Existing Google Sheet' }}</p>
 
                             <div v-if="run.summary">

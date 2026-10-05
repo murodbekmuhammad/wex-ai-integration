@@ -1,7 +1,8 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { api } from '../api';
 import AgentCard from './AgentCard.vue';
+import AgentRuns from './AgentRuns.vue';
 import AppHeader from './AppHeader.vue';
 import Icon from './Icon.vue';
 import Spinner from './Spinner.vue';
@@ -13,6 +14,33 @@ const agents = ref([]);
 const loading = ref(true);
 const error = ref('');
 
+// Every agent's saved results in one table; filter is an agent key, or '' for all agents.
+const runs = ref([]);
+const runsLoading = ref(true);
+const runsError = ref('');
+const filter = ref('');
+
+async function loadRuns() {
+    const agent = filter.value;
+
+    try {
+        const data = await api('GET', agent ? `/agent-runs?agent=${encodeURIComponent(agent)}` : '/agent-runs');
+
+        // A slower answer for a filter the user has already changed is dropped.
+        if (agent !== filter.value) return;
+
+        runs.value = data.runs;
+        runsError.value = '';
+    } catch (e) {
+        if (e.status === 401) return emit('logout');
+        runsError.value = e.message;
+    } finally {
+        runsLoading.value = false;
+    }
+}
+
+watch(filter, loadRuns);
+
 const greeting = computed(() => {
     const hour = new Date().getHours();
     const part = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
@@ -22,6 +50,8 @@ const greeting = computed(() => {
 });
 
 onMounted(async () => {
+    loadRuns();
+
     try {
         agents.value = (await api('GET', '/agents')).agents;
     } catch (e) {
@@ -70,9 +100,13 @@ onMounted(async () => {
                 </div>
             </div>
 
-            <div v-else class="grid animate-fade-up items-start gap-6 lg:grid-cols-2">
-                <AgentCard v-for="agent in agents" :key="agent.key" :agent="agent" @unauthorized="emit('logout')" />
-            </div>
+            <template v-else>
+                <div class="grid animate-fade-up items-start gap-6 lg:grid-cols-2">
+                    <AgentCard v-for="agent in agents" :key="agent.key" :agent="agent" @unauthorized="emit('logout')" @ran="loadRuns" />
+                </div>
+
+                <AgentRuns class="animate-fade-up" v-model:filter="filter" :runs="runs" :agents="agents" :loading="runsLoading" :error="runsError" />
+            </template>
         </main>
     </div>
 </template>

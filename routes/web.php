@@ -41,7 +41,7 @@ Route::middleware('auth')->group(function () {
     Route::post('/analyze', [AssistantController::class, 'analyze'])->middleware('throttle:10,1');
     Route::get('/agents', [AgentController::class, 'index']);
     Route::post('/agents/{key}/run', [AgentController::class, 'run'])->middleware('throttle:5,1');
-    Route::get('/agents/{key}/runs', [AgentController::class, 'runs']);
+    Route::get('/agent-runs', [AgentController::class, 'runs']);
     Route::get('/agent-settings', [AgentSettingController::class, 'show']);
     Route::put('/agent-settings', [AgentSettingController::class, 'update']);
     Route::post('/agent', [AgentController::class, 'task'])->middleware('throttle:5,1');

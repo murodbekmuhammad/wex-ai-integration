@@ -11,6 +11,7 @@ use App\Services\ReportAgent;
 use Generator;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
@@ -25,7 +26,7 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 class AgentController extends Controller
 {
     /**
-     * The most saved results listed for one agent.
+     * The most saved results listed at once.
      */
     public const LISTED_RUNS = 20;
 
@@ -93,18 +94,18 @@ class AgentController extends Controller
     /**
      * runs
      *
-     * The user's saved results of one agent, newest first.
+     * The user's saved results of every agent, newest first, or of one agent
+     * when the "agent" query parameter names it.
      *
      * @param Request $request
-     * @param string $key an agent key from config/agents.php
      * @return JsonResponse
      */
-    public function runs(Request $request, string $key): JsonResponse
+    public function runs(Request $request): JsonResponse
     {
-        abort_unless(is_array(config("agents.{$key}")), 404);
+        $key = $request->validate(['agent' => ['nullable', 'string', Rule::in(array_keys(config('agents')))]])['agent'] ?? null;
 
         $runs = $request->user()->agentRuns()
-            ->where('agent_key', $key)
+            ->when($key, fn ($query, string $key) => $query->where('agent_key', $key))
             ->latest()
             ->orderByDesc('id')
             ->limit(self::LISTED_RUNS)
