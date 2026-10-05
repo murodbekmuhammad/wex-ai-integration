@@ -19,6 +19,7 @@ const toolIcons = {
     collect_pdfs: 'inbox',
     find_pdfs: 'document',
     create_aging_report: 'table',
+    create_reserve_report: 'table',
     build_table: 'sparkles',
     upload_to_google_sheets: 'cloud',
     email_sheet_link: 'send',

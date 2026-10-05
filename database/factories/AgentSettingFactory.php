@@ -25,6 +25,7 @@ class AgentSettingFactory extends Factory
     {
         return [
             'user_id' => User::factory(),
+            'agent_key' => 'invoice_aging',
             'sheet_mode' => AgentRun::SHEET_EXISTING,
             'pdf_document_ids' => null,
         ];

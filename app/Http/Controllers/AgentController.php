@@ -5,7 +5,6 @@ namespace App\Http\Controllers;
 use Anthropic\Core\Exceptions\APIException;
 use App\Http\Requests\RunAgentRequest;
 use App\Models\AgentRun;
-use App\Models\AgentSetting;
 use App\Models\User;
 use App\Services\ClaudeErrors;
 use App\Services\ReportAgent;
@@ -58,8 +57,8 @@ class AgentController extends Controller
      *
      * Run one of the configured agents with its fixed task and tools, the
      * way the user's agent settings say: its report updates the agent's
-     * existing Google Sheet or goes to a new one, and it reads every invoice
-     * aging PDF or only the picked ones. The result is saved when the run
+     * existing Google Sheet or goes to a new one, and it reads every PDF of
+     * its report type or only the picked ones. The result is saved when the run
      * ends.
      *
      * @param Request $request
@@ -77,7 +76,7 @@ class AgentController extends Controller
         }
 
         $user = $request->user();
-        $setting = $user->agentSetting ?? new AgentSetting;
+        $setting = $user->agentSettingFor($key);
         $sheetMode = $setting->sheet_mode;
 
         return $this->streamEvents(

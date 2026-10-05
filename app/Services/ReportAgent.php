@@ -34,6 +34,8 @@ class ReportAgent
 
         For the factoring aging report, use create_aging_report: it reads the newest invoice aging PDF in code and creates the whole workbook as a Google Sheet, so don't use build_table for it. When the task says to fetch new emails, or create_aging_report finds no aging PDF, run collect_pdfs first.
 
+        For the reserve account report, use create_reserve_report the same way: it reads the newest reserve account detail PDF in code and creates the workbook as a Google Sheet. Run collect_pdfs first when the task says to fetch new emails or it finds no reserve account detail PDF.
+
         For any other table: find the PDFs the task is about with find_pdfs, build the table the user wants from them with build_table and upload it with upload_to_google_sheets.
 
         Email the link with email_sheet_link when the task asks for it and that tool is available; without it, the user sees the sheet link on screen, so say so in your summary. Only take the steps the task asks for; don't upload or email unless asked. When the task names no dates, use the current month so far.
@@ -65,7 +67,7 @@ class ReportAgent
      * @param array<int, string>|null $tools names of the tools Claude may use; every tool when null
      * @param string|null $agentKey the configured agent being run, whose report goes to its own Google Sheet
      * @param bool $newSheet put the agent's report in a new Google Sheet instead of updating its existing one
-     * @param array<int, int>|null $documentIds the only invoice aging PDFs the aging report may be built from; any when null
+     * @param array<int, int>|null $documentIds the only PDFs the agent's report may be built from (picked in the agent settings); any when null
      * @return Generator<int, array{type: string, tool?: string, label?: string, ok?: bool, text?: string, link?: string|null}>
      * @throws APIException
      */

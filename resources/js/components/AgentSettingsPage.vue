@@ -8,6 +8,13 @@ import Spinner from './Spinner.vue';
 defineProps({ user: Object });
 const emit = defineEmits(['logout']);
 
+// The agents to switch between; each one's settings are loaded and saved on their own.
+const agents = ref([]);
+const agentKey = ref('');
+const reportName = (agent) => (agent?.report_type || '').replaceAll('_', ' ');
+const reportLabel = (agent) => reportName(agent).replace(/^./, (letter) => letter.toUpperCase());
+const report = computed(() => reportName(agents.value.find((agent) => agent.key === agentKey.value)));
+
 // Where a run puts its report: the agent's existing Google Sheet, or a new one.
 const sheetMode = ref('existing');
 const sheetOptions = [
@@ -15,19 +22,20 @@ const sheetOptions = [
     { value: 'new', label: 'New Google Sheet', hint: 'Every run puts its report in a new sheet.' },
 ];
 
-// The invoice aging PDFs collected from email; with "all" on, the agent uses every one of them.
+// The agent's PDFs collected from email; with "all" on, the agent uses every one of them.
 const pdfs = ref([]);
 const all = ref(true);
 const selected = ref([]);
 
 const loading = ref(true);
+const switching = ref(false);
 const resyncing = ref(false);
 const resynced = ref(null);
 const saving = ref(false);
 const saved = ref(false);
 const error = ref('');
 
-const canSave = computed(() => !saving.value && (all.value || selected.value.length > 0));
+const canSave = computed(() => !saving.value && !switching.value && (all.value || selected.value.length > 0));
 
 function handleError(e) {
     if (e.status === 401) return emit('logout');
@@ -49,6 +57,7 @@ async function save() {
 
     try {
         const data = await api('PUT', '/agent-settings', {
+            agent_key: agentKey.value,
             sheet_mode: sheetMode.value,
             pdf_document_ids: all.value ? null : selected.value,
         });
@@ -69,7 +78,7 @@ async function resync() {
 
     try {
         const { collected } = await api('POST', '/pdfs/collect', {});
-        pdfs.value = (await api('GET', '/agent-settings')).pdfs;
+        pdfs.value = (await api('GET', settingsUrl(agentKey.value))).pdfs;
 
         const ids = new Set(pdfs.value.map((pdf) => pdf.id));
         selected.value = selected.value.filter((id) => ids.has(id));
@@ -83,11 +92,37 @@ async function resync() {
 
 const formatDate = (value) => new Date(value).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
 
+const settingsUrl = (key) => (key ? `/agent-settings?agent=${encodeURIComponent(key)}` : '/agent-settings');
+
+// Load one agent's saved settings and PDFs; unsaved changes to the agent shown before are dropped.
+async function load(key) {
+    const data = await api('GET', settingsUrl(key));
+    agents.value = data.agents;
+    agentKey.value = data.agent;
+    pdfs.value = data.pdfs;
+    apply(data.settings);
+    saved.value = false;
+    resynced.value = null;
+}
+
+async function switchAgent(key) {
+    if (key === agentKey.value || switching.value) return;
+
+    switching.value = true;
+    error.value = '';
+
+    try {
+        await load(key);
+    } catch (e) {
+        handleError(e);
+    } finally {
+        switching.value = false;
+    }
+}
+
 onMounted(async () => {
     try {
-        const data = await api('GET', '/agent-settings');
-        pdfs.value = data.pdfs;
-        apply(data.settings);
+        await load();
     } catch (e) {
         handleError(e);
     } finally {
@@ -108,7 +143,7 @@ onMounted(async () => {
         <main class="mx-auto max-w-3xl space-y-8 px-4 py-10 sm:px-6">
             <div class="animate-fade-up">
                 <h1 class="text-3xl font-semibold tracking-tight text-zinc-950 sm:text-4xl">Agent settings</h1>
-                <p class="mt-2 text-zinc-500">Choose where the agent puts its report and which invoice aging PDFs it works with.</p>
+                <p class="mt-2 text-zinc-500">Choose, for each agent, where it puts its report and which PDFs it works with.</p>
             </div>
 
             <div v-if="loading" class="flex items-center gap-2 text-sm text-zinc-500">
@@ -116,6 +151,28 @@ onMounted(async () => {
             </div>
 
             <form v-else @submit.prevent="save" class="animate-fade-up space-y-6">
+                <section class="card p-5 sm:p-6">
+                    <div class="flex items-start gap-4">
+                        <span class="icon-badge bg-sky-50 text-sky-600 ring-sky-600/10">
+                            <Icon name="bolt" class="size-5" />
+                        </span>
+                        <div>
+                            <h2 class="font-semibold text-zinc-950">Report</h2>
+                            <p class="mt-1 text-sm text-zinc-500">The agent whose settings you’re changing. Each one is saved on its own.</p>
+                        </div>
+                    </div>
+
+                    <div role="radiogroup" aria-label="Report" class="mt-4 grid gap-3 sm:grid-cols-2">
+                        <button v-for="agent in agents" :key="agent.key" type="button" role="radio"
+                                :aria-checked="agentKey === agent.key" :disabled="switching" @click="switchAgent(agent.key)"
+                                class="rounded-xl p-4 text-left ring-1 transition"
+                                :class="agentKey === agent.key ? 'bg-violet-50/60 ring-violet-600/40' : 'bg-white ring-zinc-950/10 hover:ring-zinc-950/20'">
+                            <span class="block text-sm font-medium text-zinc-950">{{ reportLabel(agent) }}</span>
+                            <span class="mt-1 block text-sm text-zinc-500">{{ agent.name }}</span>
+                        </button>
+                    </div>
+                </section>
+
                 <section class="card p-5 sm:p-6">
                     <div class="flex items-start gap-4">
                         <span class="icon-badge bg-violet-50 text-violet-600 ring-violet-600/10">
@@ -138,13 +195,13 @@ onMounted(async () => {
                     </div>
                 </section>
 
-                <section class="card overflow-hidden">
+                <section class="card overflow-hidden transition-opacity" :class="{ 'opacity-60': switching }">
                     <div class="flex items-start gap-4 p-5 sm:p-6">
                         <span class="icon-badge bg-rose-50 text-rose-600 ring-rose-600/10">
                             <Icon name="document" class="size-5" />
                         </span>
                         <div class="min-w-0 flex-1">
-                            <h2 class="font-semibold text-zinc-950">Invoice aging PDFs</h2>
+                            <h2 class="font-semibold text-zinc-950 first-letter:uppercase">{{ report }} PDFs</h2>
                             <p class="mt-1 text-sm text-zinc-500">The PDFs from your email the agent may use. It builds the report from the newest of them.</p>
                         </div>
                         <button type="button" @click="resync" :disabled="resyncing" class="btn btn-secondary shrink-0"
@@ -163,11 +220,11 @@ onMounted(async () => {
                     <label class="flex cursor-pointer items-center gap-3 border-t border-zinc-950/5 px-5 py-3 text-sm sm:px-6">
                         <input type="checkbox" v-model="all" @change="saved = false" class="size-4 cursor-pointer rounded accent-violet-600">
                         <span class="font-medium text-zinc-900">All</span>
-                        <span class="text-zinc-500">every invoice aging PDF, including ones that arrive later</span>
+                        <span class="text-zinc-500">every {{ report }} PDF, including ones that arrive later</span>
                     </label>
 
                     <p v-if="!pdfs.length" class="border-t border-zinc-950/5 px-5 py-6 text-sm text-zinc-500 sm:px-6">
-                        No invoice aging PDFs have been collected yet. Run the agent or collect PDFs in the workspace first.
+                        No {{ report }} PDFs have been collected yet. Run the agent or collect PDFs in the workspace first.
                     </p>
 
                     <ul v-else class="scroll-thin max-h-96 divide-y divide-zinc-950/5 overflow-y-auto border-t border-zinc-950/5"

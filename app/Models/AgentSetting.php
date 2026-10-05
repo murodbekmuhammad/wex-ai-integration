@@ -14,11 +14,12 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  *
  * @package App\Models
  *
- * How a user's agents run: which Google Sheet the report goes to and which
- * invoice aging PDFs the agent may use. A user without a saved row gets the
+ * How one of a user's agents runs: which Google Sheet its report goes to
+ * and which PDFs of its report type it may use. Each agent
+ * (config/agents.php) has its own row; an agent without one gets the
  * defaults: the existing sheet and all PDFs.
  */
-#[Fillable(['sheet_mode', 'pdf_document_ids'])]
+#[Fillable(['agent_key', 'sheet_mode', 'pdf_document_ids'])]
 #[Hidden(['id', 'user_id', 'created_at', 'updated_at'])]
 class AgentSetting extends Model
 {

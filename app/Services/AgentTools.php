@@ -22,8 +22,9 @@ use Symfony\Component\Mailer\Exception\TransportExceptionInterface;
  * @package App\Services
  *
  * The actions the report agent can take on the user's behalf: collecting
- * PDFs from Gmail, finding collected PDFs, building a table or the aging
- * report workbook from them, uploading to Google Sheets and emailing the link. Every lookup is scoped to the user, and email
+ * PDFs from Gmail, finding collected PDFs, building a table, the aging
+ * report workbook or the reserve account workbook from them, uploading to
+ * Google Sheets and emailing the link. Every lookup is scoped to the user, and email
  * only goes to the user's own sign-in address, never one Claude picks.
  */
 class AgentTools
@@ -47,6 +48,8 @@ class AgentTools
      * @param PdfClassifier $classifier
      * @param AgingReportParser $parser
      * @param AgingWorkbook $workbook
+     * @param ReserveReportParser $reserveParser
+     * @param ReserveWorkbook $reserveWorkbook
      */
     public function __construct(
         private TableBuilder $builder,
@@ -55,6 +58,8 @@ class AgentTools
         private PdfClassifier $classifier,
         private AgingReportParser $parser,
         private AgingWorkbook $workbook,
+        private ReserveReportParser $reserveParser,
+        private ReserveWorkbook $reserveWorkbook,
     ) {}
 
     /**
@@ -112,6 +117,16 @@ class AgentTools
                     'type' => 'object',
                     'properties' => [
                         'document_id' => ['type' => 'integer', 'description' => 'An invoice aging PDF id from find_pdfs; omit for the newest.'],
+                    ],
+                ],
+            ],
+            [
+                'name' => 'create_reserve_report',
+                'description' => 'Create or update the reserve account Google Sheet from a reserve account detail PDF: a RESERVE DETAIL tab with every reserve transaction line and a SUMMARY tab with the opening and closing reserve balance and totals per transaction and activity type. The same sheet is updated on every run. The PDF is read by code and checked against its grand total, so the figures are exact. Uses the newest reserve account detail PDF unless a document_id is given. Returns the table id to email, the sheet link and the headline figures.',
+                'inputSchema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'document_id' => ['type' => 'integer', 'description' => 'A reserve account detail PDF id from find_pdfs; omit for the newest.'],
                     ],
                 ],
             ],
@@ -180,6 +195,7 @@ class AgentTools
         return match ($name) {
             'collect_pdfs' => 'Collecting new PDFs from Gmail…',
             'create_aging_report' => 'Reading the aging report and updating the Google Sheet…',
+            'create_reserve_report' => 'Reading the reserve account report and updating the Google Sheet…',
             'find_pdfs' => 'Finding PDFs…',
             'build_table' => 'Reading the PDFs and building the table…',
             'upload_to_google_sheets' => 'Uploading to Google Sheets…',
@@ -199,7 +215,7 @@ class AgentTools
      * @param array<string, mixed> $input
      * @param string|null $agentKey the agent running the tool (config/agents.php); its report goes to the same Google Sheet
      * @param bool $newSheet put the agent's report in a new Google Sheet instead of updating its existing one
-     * @param array<int, int>|null $documentIds the only invoice aging PDFs the aging report may be built from; any when null
+     * @param array<int, int>|null $documentIds the only PDFs the agent's report may be built from (picked in the agent settings); any when null
      * @return array{content: string, is_error: bool, progress: string, link?: string} content goes back to Claude; progress, and the link to a created sheet, go to the user
      */
     public function run(User $user, string $name, array $input, ?string $agentKey = null, bool $newSheet = false, ?array $documentIds = null): array
@@ -208,6 +224,7 @@ class AgentTools
             return match ($name) {
                 'collect_pdfs' => $this->collectPdfs($user, $input),
                 'create_aging_report' => $this->createAgingReport($user, $input, $agentKey, $newSheet, $documentIds),
+                'create_reserve_report' => $this->createReserveReport($user, $input, $agentKey, $newSheet, $documentIds),
                 'find_pdfs' => $this->findPdfs($user, $input),
                 'build_table' => $this->buildTable($user, $input),
                 'upload_to_google_sheets' => $this->uploadToGoogleSheets($user, $input),
@@ -282,16 +299,7 @@ class AgentTools
     {
         $input = $this->validate($input, ['document_id' => ['nullable', 'integer']]);
 
-        $document = $user->pdfDocuments()
-            ->where('report_type', 'invoice_aging')
-            ->when($documentIds !== null, fn ($query) => $query->whereIn('id', $documentIds))
-            ->when($input['document_id'] ?? null, fn ($query, $id) => $query->where('id', $id))
-            ->orderByDesc('sent_at')
-            ->orderByDesc('id')
-            ->first() ?? throw new AgentToolException($documentIds === null
-                ? 'No invoice aging PDF was found. Collect PDFs first, or pass the id of an invoice aging PDF.'
-                : 'None of the invoice aging PDFs the user picked in the agent settings was found. Only those PDFs may be used; the user can pick others on the Agent settings page.');
-
+        $document = $this->latestDocument($user, 'invoice_aging', 'invoice aging', $input['document_id'] ?? null, $documentIds);
         $contents = $document->contents() ?? throw new AgentToolException("The file {$document->filename} is missing from storage.");
 
         try {
@@ -343,6 +351,106 @@ class AgentTools
             'progress' => sprintf('%s “%s”: %d invoices, $%s open.', $verb, $sheetName, $summary['invoices'], number_format($summary['balance'], 2)),
             'link' => $sheet['url'],
         ];
+    }
+
+    /**
+     * createReserveReport
+     *
+     * Read a reserve account detail PDF in code and build the reserve
+     * account workbook from it, then publish it to the agent's Google Sheet
+     * (see publishReport). When the user picked PDFs in the agent settings,
+     * only those are used.
+     *
+     * @param User $user
+     * @param array<string, mixed> $input
+     * @param string|null $agentKey
+     * @param bool $newSheet
+     * @param array<int, int>|null $documentIds
+     * @return array{content: string, is_error: bool, progress: string, link: string}
+     * @throws AgentToolException
+     */
+    private function createReserveReport(User $user, array $input, ?string $agentKey, bool $newSheet, ?array $documentIds = null): array
+    {
+        $input = $this->validate($input, ['document_id' => ['nullable', 'integer']]);
+        $document = $this->latestDocument($user, 'reserve_account_detail', 'reserve account detail', $input['document_id'] ?? null, $documentIds);
+        $contents = $document->contents() ?? throw new AgentToolException("The file {$document->filename} is missing from storage.");
+
+        try {
+            $report = $this->reserveParser->parsePdf($contents);
+        } catch (ReserveReportException $e) {
+            throw new AgentToolException("{$document->filename}: {$e->getMessage()}");
+        }
+
+        $sheetName = trim("Reserve account {$report['client']}");
+        $period = $report['from'] && $report['to']
+            ? now()->parse($report['from'])->format('M j, Y').' to '.now()->parse($report['to'])->format('M j, Y')
+            : $document->sent_at->format('M j, Y');
+        $summary = $this->reserveWorkbook->summary($report);
+
+        [$sheet, $table] = $this->publishReport(
+            $user,
+            $agentKey,
+            $newSheet,
+            $sheetName,
+            fn () => $this->reserveWorkbook->build($report),
+        );
+        $updated = $table->exists;
+
+        $table->fill([
+            'title' => "{$sheetName}, {$period}",
+            'request' => "Reserve account report from {$document->filename}",
+            'summary' => sprintf('%d reserve lines from %d debtors, reserve balance $%s.', $summary['rows'], $summary['debtors'], number_format($summary['closing_balance'], 2)),
+            'columns' => config('report_types.reserve_account_detail'),
+            'rows' => array_map(fn (array $row) => array_map(fn (string $field) => $row[$field], ReserveWorkbook::FIELDS), $report['rows']),
+            'warnings' => [],
+            'pdf_document_ids' => [$document->id],
+            'google_sheet_id' => $sheet['id'],
+            'google_sheet_url' => $sheet['url'],
+        ])->save();
+
+        $verb = $updated ? 'Updated' : 'Created';
+
+        return [
+            'content' => $this->json([
+                'table_id' => $table->id,
+                'sheet' => $updated ? 'updated the existing sheet' : 'created a new sheet',
+                'google_sheet_url' => $sheet['url'],
+                'source' => ['filename' => $document->filename, 'factor' => $report['factor'], 'report' => $report['title'], 'from' => $report['from'], 'to' => $report['to']],
+                ...$summary,
+                'grand_total' => $report['grand_total'],
+            ]),
+            'is_error' => false,
+            'progress' => sprintf('%s “%s”: %d lines, reserve balance $%s.', $verb, $sheetName, $summary['rows'], number_format($summary['closing_balance'], 2)),
+            'link' => $sheet['url'],
+        ];
+    }
+
+    /**
+     * latestDocument
+     *
+     * The newest of the user's PDFs of a report type, or the one with the
+     * given id. When the user picked PDFs in the agent settings, only those
+     * count.
+     *
+     * @param User $user
+     * @param string $type a report type from config/report_types.php
+     * @param string $name the report type for messages, e.g. "invoice aging"
+     * @param int|null $id
+     * @param array<int, int>|null $documentIds
+     * @return PdfDocument
+     * @throws AgentToolException when there is no such PDF
+     */
+    private function latestDocument(User $user, string $type, string $name, ?int $id, ?array $documentIds): PdfDocument
+    {
+        return $user->pdfDocuments()
+            ->where('report_type', $type)
+            ->when($documentIds !== null, fn ($query) => $query->whereIn('id', $documentIds))
+            ->when($id, fn ($query, $id) => $query->where('id', $id))
+            ->orderByDesc('sent_at')
+            ->orderByDesc('id')
+            ->first() ?? throw new AgentToolException($documentIds === null
+                ? "No {$name} PDF was found. Collect PDFs first, or pass the id of one from find_pdfs."
+                : "None of the {$name} PDFs the user picked in the agent settings was found. Only those PDFs may be used; the user can pick others on the Agent settings page.");
     }
 
     /**

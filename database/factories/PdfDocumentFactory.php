@@ -50,4 +50,16 @@ class PdfDocumentFactory extends Factory
     {
         return $this->state(fn () => ['report_type' => 'invoice_aging', 'classified_at' => now()]);
     }
+
+    /**
+     * reserveAccountDetail
+     *
+     * A PDF already tagged as a reserve account detail report.
+     *
+     * @return static
+     */
+    public function reserveAccountDetail(): static
+    {
+        return $this->state(fn () => ['report_type' => 'reserve_account_detail', 'classified_at' => now()]);
+    }
 }

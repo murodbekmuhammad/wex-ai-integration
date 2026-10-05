@@ -7,7 +7,6 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\HasMany;
-use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 
@@ -86,14 +85,28 @@ class User extends Authenticatable
     }
 
     /**
-     * agentSetting
+     * agentSettings
      *
-     * How this user's agents run; none saved yet means the defaults.
+     * How this user's agents run, one row per agent that has saved settings.
      *
-     * @return HasOne<AgentSetting, $this>
+     * @return HasMany<AgentSetting, $this>
      */
-    public function agentSetting(): HasOne
+    public function agentSettings(): HasMany
     {
-        return $this->hasOne(AgentSetting::class);
+        return $this->hasMany(AgentSetting::class);
+    }
+
+    /**
+     * agentSettingFor
+     *
+     * How one of this user's agents runs; the defaults when none are saved.
+     *
+     * @param string $agentKey an agent key from config/agents.php
+     * @return AgentSetting
+     */
+    public function agentSettingFor(string $agentKey): AgentSetting
+    {
+        return $this->agentSettings()->firstWhere('agent_key', $agentKey)
+            ?? new AgentSetting(['agent_key' => $agentKey]);
     }
 }
