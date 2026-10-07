@@ -15,6 +15,7 @@ use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
 use Symfony\Component\Mailer\Exception\TransportExceptionInterface;
+use Throwable;
 
 /**
  * @class AgentTools
@@ -235,6 +236,10 @@ class AgentTools
             };
         } catch (AgentToolException $e) {
             return $this->error($e->getMessage());
+        } catch (Throwable $e) {
+            report($e);
+
+            return $this->error('The tool failed unexpectedly ('.class_basename($e).').');
         }
     }
 

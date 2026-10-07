@@ -17,6 +17,11 @@ use Anthropic\Core\Exceptions\RateLimitException;
 class ClaudeErrors
 {
     /**
+     * What the user is told when a run fails for a reason other than Claude.
+     */
+    public const UNEXPECTED = 'Something went wrong on our side. Please try again; if it keeps happening, let us know.';
+
+    /**
      * describe
      *
      * A readable explanation of what went wrong.

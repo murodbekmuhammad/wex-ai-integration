@@ -17,8 +17,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * The saved result of one run of a configured agent: its summary, the
  * Google Sheet it wrote to and the steps it took.
  */
-#[Fillable(['agent_key', 'sheet_mode', 'status', 'summary', 'google_sheet_url', 'steps', 'started_at', 'finished_at'])]
-#[Hidden(['user_id'])]
+#[Fillable(['agent_key', 'sheet_mode', 'status', 'summary', 'error', 'google_sheet_url', 'steps', 'started_at', 'finished_at'])]
+#[Hidden(['user_id', 'error'])]
 class AgentRun extends Model
 {
     /** @use HasFactory<AgentRunFactory> */

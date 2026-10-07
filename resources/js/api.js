@@ -61,7 +61,15 @@ export async function apiEvents(url, body, onEvent) {
         buffer = final ? '' : lines.pop();
 
         for (const line of lines) {
-            if (line.trim()) onEvent(JSON.parse(line));
+            if (!line.trim()) continue;
+
+            let event;
+            try {
+                event = JSON.parse(line);
+            } catch {
+                throw new Error('The server sent an unexpected response. Please try again.');
+            }
+            onEvent(event);
         }
     };
 

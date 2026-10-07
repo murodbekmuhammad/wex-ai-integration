@@ -7,6 +7,7 @@ use App\Services\ClaudeErrors;
 use Closure;
 use Illuminate\Http\JsonResponse;
 use Symfony\Component\HttpFoundation\StreamedResponse;
+use Throwable;
 
 /**
  * @class Controller
@@ -56,8 +57,8 @@ abstract class Controller
      * streamEvents
      *
      * Stream a generator of events back to the browser as newline-delimited
-     * JSON, one event per line. A Claude failure becomes a final "error"
-     * event.
+     * JSON, one event per line. Any failure becomes a final "error" event,
+     * so the stream always stays valid JSON lines.
      *
      * @param Closure(): iterable<int, array<string, mixed>> $events
      * @param int|null $timeLimit seconds the stream may take; the usual Claude time limit when null
@@ -86,6 +87,10 @@ abstract class Controller
                 }
 
                 $send(['type' => 'error', 'text' => ClaudeErrors::describe($e)]);
+            } catch (Throwable $e) {
+                report($e);
+
+                $send(['type' => 'error', 'text' => ClaudeErrors::UNEXPECTED]);
             }
         }, 200, [
             'Content-Type' => 'application/x-ndjson; charset=utf-8',

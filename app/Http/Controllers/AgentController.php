@@ -13,6 +13,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
 use Symfony\Component\HttpFoundation\StreamedResponse;
+use Throwable;
 
 /**
  * @class AgentController
@@ -140,7 +141,8 @@ class AgentController extends Controller
      *
      * Pass the agent's events through, noting its steps, sheet link and
      * summary, and save them as an AgentRun once the run ends, whether it
-     * finished, hit the turn limit or Claude failed.
+     * finished, hit the turn limit or failed. An unexpected exception is
+     * saved on the run's error.
      *
      * @param User $user
      * @param string $key
@@ -148,6 +150,7 @@ class AgentController extends Controller
      * @param Generator<int, array<string, mixed>> $events
      * @return Generator<int, array<string, mixed>>
      * @throws APIException
+     * @throws Throwable
      */
     private function record(User $user, string $key, string $sheetMode, Generator $events): Generator
     {
@@ -156,6 +159,7 @@ class AgentController extends Controller
         $sheetUrl = null;
         $status = 'failed';
         $summary = null;
+        $error = null;
 
         try {
             foreach ($events as $event) {
@@ -175,12 +179,18 @@ class AgentController extends Controller
             $summary = ClaudeErrors::describe($e);
 
             throw $e;
+        } catch (Throwable $e) {
+            $summary = ClaudeErrors::UNEXPECTED;
+            $error = $e::class.': '.$e->getMessage().' at '.$e->getFile().':'.$e->getLine();
+
+            throw $e;
         } finally {
             $user->agentRuns()->create([
                 'agent_key' => $key,
                 'sheet_mode' => $sheetMode,
                 'status' => $status,
                 'summary' => $summary,
+                'error' => $error,
                 'google_sheet_url' => $sheetUrl,
                 'steps' => $steps,
                 'started_at' => $startedAt,
