@@ -83,8 +83,12 @@ class SharedWorkbook
 
         ob_start();
         (new Xlsx($book))->setIncludeCharts(true)->save('php://output');
+        $xlsx = (string) ob_get_clean();
 
-        return (string) ob_get_clean();
+        $book->disconnectWorksheets();
+        $old->disconnectWorksheets();
+
+        return $xlsx;
     }
 
     /**

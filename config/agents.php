@@ -1,6 +1,7 @@
 <?php
 
 use App\Services\AgingWorkbook;
+use App\Services\PaymentWorkbook;
 use App\Services\ReserveWorkbook;
 
 /*
@@ -34,5 +35,13 @@ return [
         'description' => 'Collects new PDFs from Gmail and turns the newest reserve account detail report into the RESERVE DETAIL and SUMMARY tabs of your factoring Google Sheet, after the aging tabs: every reserve transaction line and a summary of totals by type, with the opening and closing reserve balance. Each run updates the same sheet and leaves the other agents’ tabs as they are.',
         'task' => 'Collect new PDFs from Gmail and update the reserve account tabs of the factoring Google Sheet from the newest reserve account detail report.',
         'tools' => ['collect_pdfs', 'find_pdfs', 'create_reserve_report'],
+    ],
+    'payment_report' => [
+        'name' => 'Payment report agent',
+        'report_type' => 'daily_payment_report',
+        'workbook' => PaymentWorkbook::class,
+        'description' => 'Collects new PDFs from Gmail and turns the newest daily payment report into the PAYMENT DETAIL and PAYMENT SUMMARY tabs of your factoring Google Sheet, after the reserve account tabs: every invoice line with its payor, debtor and check, and a summary with the report’s collection totals and totals by payor and adjust type. Each run updates the same sheet and leaves the other agents’ tabs as they are.',
+        'task' => 'Collect new PDFs from Gmail and update the payment report tabs of the factoring Google Sheet from the newest daily payment report.',
+        'tools' => ['collect_pdfs', 'find_pdfs', 'create_payment_report'],
     ],
 ];

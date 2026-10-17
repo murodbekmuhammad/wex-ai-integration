@@ -24,7 +24,7 @@ use Throwable;
  *
  * The actions the report agent can take on the user's behalf: collecting
  * PDFs from Gmail, finding collected PDFs, building a table, the aging
- * report workbook or the reserve account workbook from them, uploading to
+ * report, reserve account or payment report workbook from them, uploading to
  * Google Sheets and emailing the link. Every lookup is scoped to the user, and email
  * only goes to the user's own sign-in address, never one Claude picks.
  */
@@ -51,6 +51,8 @@ class AgentTools
      * @param AgingWorkbook $workbook
      * @param ReserveReportParser $reserveParser
      * @param ReserveWorkbook $reserveWorkbook
+     * @param PaymentReportParser $paymentParser
+     * @param PaymentWorkbook $paymentWorkbook
      * @param SharedWorkbook $sharedWorkbook
      */
     public function __construct(
@@ -62,6 +64,8 @@ class AgentTools
         private AgingWorkbook $workbook,
         private ReserveReportParser $reserveParser,
         private ReserveWorkbook $reserveWorkbook,
+        private PaymentReportParser $paymentParser,
+        private PaymentWorkbook $paymentWorkbook,
         private SharedWorkbook $sharedWorkbook,
     ) {}
 
@@ -134,6 +138,16 @@ class AgentTools
                 ],
             ],
             [
+                'name' => 'create_payment_report',
+                'description' => 'Create or update the payment report tabs of the shared factoring Google Sheet from a daily payment report PDF, placed after the reserve account tabs: a PAYMENT DETAIL tab with every invoice line and its payor, debtor and check, and a PAYMENT SUMMARY tab with the report\'s collection summary and totals per payor and adjust type. The same sheet is updated on every run, keeping the other agents\' tabs. The PDF is read by code and checked against its grand total, so the figures are exact. Uses the newest daily payment report PDF unless a document_id is given. Returns the table id to email, the sheet link and the headline figures.',
+                'inputSchema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'document_id' => ['type' => 'integer', 'description' => 'A daily payment report PDF id from find_pdfs; omit for the newest.'],
+                    ],
+                ],
+            ],
+            [
                 'name' => 'find_pdfs',
                 'description' => 'List the PDFs already collected from the user\'s mailbox that were emailed between two dates, newest first, optionally only one report type or only certain senders. Returns each PDF\'s id, filename, sender, subject, date and report type (null when unknown), up to '.self::MAX_LISTED.' PDFs.',
                 'inputSchema' => [
@@ -199,6 +213,7 @@ class AgentTools
             'collect_pdfs' => 'Collecting new PDFs from Gmail…',
             'create_aging_report' => 'Reading the aging report and updating its tabs in the Google Sheet…',
             'create_reserve_report' => 'Reading the reserve account report and updating its tabs in the Google Sheet…',
+            'create_payment_report' => 'Reading the payment report and updating its tabs in the Google Sheet…',
             'find_pdfs' => 'Finding PDFs…',
             'build_table' => 'Reading the PDFs and building the table…',
             'upload_to_google_sheets' => 'Uploading to Google Sheets…',
@@ -228,6 +243,7 @@ class AgentTools
                 'collect_pdfs' => $this->collectPdfs($user, $input),
                 'create_aging_report' => $this->createAgingReport($user, $input, $agentKey, $newSheet, $documentIds),
                 'create_reserve_report' => $this->createReserveReport($user, $input, $agentKey, $newSheet, $documentIds),
+                'create_payment_report' => $this->createPaymentReport($user, $input, $agentKey, $newSheet, $documentIds),
                 'find_pdfs' => $this->findPdfs($user, $input),
                 'build_table' => $this->buildTable($user, $input),
                 'upload_to_google_sheets' => $this->uploadToGoogleSheets($user, $input),
@@ -430,6 +446,80 @@ class AgentTools
             ]),
             'is_error' => false,
             'progress' => sprintf('%s the reserve tabs of “%s”: %d lines, reserve balance $%s.', $verb, $fileName, $summary['rows'], number_format($summary['closing_balance'], 2)),
+            'link' => $sheet['url'],
+        ];
+    }
+
+    /**
+     * createPaymentReport
+     *
+     * Read a daily payment report PDF in code and build the payment report
+     * workbook from it, then publish it as the payment tabs of the shared
+     * Google Sheet (see publishReport). When the user picked PDFs in the
+     * agent settings, only those are used.
+     *
+     * @param User $user
+     * @param array<string, mixed> $input
+     * @param string|null $agentKey
+     * @param bool $newSheet
+     * @param array<int, int>|null $documentIds
+     * @return array{content: string, is_error: bool, progress: string, link: string}
+     * @throws AgentToolException
+     */
+    private function createPaymentReport(User $user, array $input, ?string $agentKey, bool $newSheet, ?array $documentIds = null): array
+    {
+        $input = $this->validate($input, ['document_id' => ['nullable', 'integer']]);
+        $document = $this->latestDocument($user, 'daily_payment_report', 'daily payment report', $input['document_id'] ?? null, $documentIds);
+        $contents = $document->contents() ?? throw new AgentToolException("The file {$document->filename} is missing from storage.");
+
+        try {
+            $report = $this->paymentParser->parsePdf($contents);
+        } catch (PaymentReportException $e) {
+            throw new AgentToolException("{$document->filename}: {$e->getMessage()}");
+        }
+
+        $reportName = trim("Payment report {$report['client']}");
+        $period = $report['from'] && $report['to'] && $report['from'] !== $report['to']
+            ? now()->parse($report['from'])->format('M j, Y').' to '.now()->parse($report['to'])->format('M j, Y')
+            : ($report['from'] ? now()->parse($report['from'])->format('M j, Y') : $document->sent_at->format('M j, Y'));
+        $summary = $this->paymentWorkbook->summary($report);
+
+        $fileName = $this->sharedSheetName($report['client']);
+
+        [$sheet, $table, $updated] = $this->publishReport(
+            $user,
+            $agentKey,
+            $newSheet,
+            $fileName,
+            fn () => $this->paymentWorkbook->build($report),
+        );
+
+        $table->fill([
+            'title' => "{$reportName}, {$period}",
+            'request' => "Payment report from {$document->filename}",
+            'summary' => sprintf('%d invoice lines from %d checks, $%s collected.', $summary['rows'], $summary['checks'], number_format($summary['collected'], 2)),
+            'columns' => array_values(PaymentWorkbook::COLUMNS),
+            'rows' => array_map(fn (array $row) => array_map(fn (string $field) => $row[$field], array_keys(PaymentWorkbook::COLUMNS)), $report['rows']),
+            'warnings' => [],
+            'pdf_document_ids' => [$document->id],
+            'google_sheet_id' => $sheet['id'],
+            'google_sheet_url' => $sheet['url'],
+        ])->save();
+
+        $verb = $updated ? 'Updated' : 'Created';
+
+        return [
+            'content' => $this->json([
+                'table_id' => $table->id,
+                'sheet' => $updated ? 'updated the existing sheet' : 'created a new sheet',
+                'google_sheet_url' => $sheet['url'],
+                'source' => ['filename' => $document->filename, 'factor' => $report['factor'], 'report' => $report['title'], 'from' => $report['from'], 'to' => $report['to']],
+                ...$summary,
+                'collection_summary' => $report['summary'],
+                'grand_total' => $report['grand_total'],
+            ]),
+            'is_error' => false,
+            'progress' => sprintf('%s the payment tabs of “%s”: %d lines, $%s collected.', $verb, $fileName, $summary['rows'], number_format($summary['collected'], 2)),
             'link' => $sheet['url'],
         ];
     }

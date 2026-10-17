@@ -62,4 +62,16 @@ class PdfDocumentFactory extends Factory
     {
         return $this->state(fn () => ['report_type' => 'reserve_account_detail', 'classified_at' => now()]);
     }
+
+    /**
+     * dailyPaymentReport
+     *
+     * A PDF already tagged as a daily payment report.
+     *
+     * @return static
+     */
+    public function dailyPaymentReport(): static
+    {
+        return $this->state(fn () => ['report_type' => 'daily_payment_report', 'classified_at' => now()]);
+    }
 }

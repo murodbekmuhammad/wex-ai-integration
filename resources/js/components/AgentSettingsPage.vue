@@ -153,28 +153,6 @@ onMounted(async () => {
             <form v-else @submit.prevent="save" class="animate-fade-up space-y-6">
                 <section class="card p-5 sm:p-6">
                     <div class="flex items-start gap-4">
-                        <span class="icon-badge bg-sky-50 text-sky-600 ring-sky-600/10">
-                            <Icon name="bolt" class="size-5" />
-                        </span>
-                        <div>
-                            <h2 class="font-semibold text-zinc-950">Report</h2>
-                            <p class="mt-1 text-sm text-zinc-500">The agent whose settings you’re changing. Each one is saved on its own.</p>
-                        </div>
-                    </div>
-
-                    <div role="radiogroup" aria-label="Report" class="mt-4 grid gap-3 sm:grid-cols-2">
-                        <button v-for="agent in agents" :key="agent.key" type="button" role="radio"
-                                :aria-checked="agentKey === agent.key" :disabled="switching" @click="switchAgent(agent.key)"
-                                class="rounded-xl p-4 text-left ring-1 transition"
-                                :class="agentKey === agent.key ? 'bg-violet-50/60 ring-violet-600/40' : 'bg-white ring-zinc-950/10 hover:ring-zinc-950/20'">
-                            <span class="block text-sm font-medium text-zinc-950">{{ reportLabel(agent) }}</span>
-                            <span class="mt-1 block text-sm text-zinc-500">{{ agent.name }}</span>
-                        </button>
-                    </div>
-                </section>
-
-                <section class="card p-5 sm:p-6">
-                    <div class="flex items-start gap-4">
                         <span class="icon-badge bg-violet-50 text-violet-600 ring-violet-600/10">
                             <Icon name="table" class="size-5" />
                         </span>
@@ -191,6 +169,28 @@ onMounted(async () => {
                                 :class="sheetMode === option.value ? 'bg-violet-50/60 ring-violet-600/40' : 'bg-white ring-zinc-950/10 hover:ring-zinc-950/20'">
                             <span class="block text-sm font-medium text-zinc-950">{{ option.label }}</span>
                             <span class="mt-1 block text-sm text-zinc-500">{{ option.hint }}</span>
+                        </button>
+                    </div>
+                </section>
+
+                <section class="card p-5 sm:p-6">
+                    <div class="flex items-start gap-4">
+                        <span class="icon-badge bg-sky-50 text-sky-600 ring-sky-600/10">
+                            <Icon name="bolt" class="size-5" />
+                        </span>
+                        <div>
+                            <h2 class="font-semibold text-zinc-950">Report</h2>
+                            <p class="mt-1 text-sm text-zinc-500">The agent whose settings you’re changing. Each one is saved on its own.</p>
+                        </div>
+                    </div>
+
+                    <div role="radiogroup" aria-label="Report" class="mt-4 grid gap-3 sm:grid-cols-3">
+                        <button v-for="agent in agents" :key="agent.key" type="button" role="radio"
+                                :aria-checked="agentKey === agent.key" :disabled="switching" @click="switchAgent(agent.key)"
+                                class="rounded-xl p-4 text-left ring-1 transition"
+                                :class="agentKey === agent.key ? 'bg-violet-50/60 ring-violet-600/40' : 'bg-white ring-zinc-950/10 hover:ring-zinc-950/20'">
+                            <span class="block text-sm font-medium text-zinc-950">{{ reportLabel(agent) }}</span>
+                            <span class="mt-1 block text-sm text-zinc-500">{{ agent.name }}</span>
                         </button>
                     </div>
                 </section>
