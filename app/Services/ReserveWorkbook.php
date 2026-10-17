@@ -55,6 +55,19 @@ class ReserveWorkbook
     private const HEADER_FILL = '1F3864';
 
     /**
+     * tabs
+     *
+     * The tabs this workbook has, in order. In the shared Google Sheet these
+     * are the reserve account agent's tabs (see SharedWorkbook).
+     *
+     * @return array<int, string>
+     */
+    public static function tabs(): array
+    {
+        return ['RESERVE DETAIL', 'SUMMARY'];
+    }
+
+    /**
      * build
      *
      * The workbook's .xlsx bytes.

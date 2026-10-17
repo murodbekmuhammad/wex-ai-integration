@@ -51,6 +51,7 @@ class AgentTools
      * @param AgingWorkbook $workbook
      * @param ReserveReportParser $reserveParser
      * @param ReserveWorkbook $reserveWorkbook
+     * @param SharedWorkbook $sharedWorkbook
      */
     public function __construct(
         private TableBuilder $builder,
@@ -61,6 +62,7 @@ class AgentTools
         private AgingWorkbook $workbook,
         private ReserveReportParser $reserveParser,
         private ReserveWorkbook $reserveWorkbook,
+        private SharedWorkbook $sharedWorkbook,
     ) {}
 
     /**
@@ -113,7 +115,7 @@ class AgentTools
             ],
             [
                 'name' => 'create_aging_report',
-                'description' => 'Create or update the factoring aging report Google Sheet from an invoice aging PDF: DASH BOARD, AGING, Aging 1+/30+/45+/60+/90+ and a per-broker "data" tab. The same sheet is updated on every run, keeping the team\'s notes. The PDF is read by code and checked against its grand total, so the figures are exact. Uses the newest invoice aging PDF unless a document_id is given. Returns the table id to email, the sheet link and the headline figures.',
+                'description' => 'Create or update the aging tabs of the shared factoring Google Sheet from an invoice aging PDF: DASH BOARD, AGING, Aging 1+/30+/45+/60+/90+ and a per-broker "data" tab. The same sheet is updated on every run, keeping the team\'s notes and the other agents\' tabs. The PDF is read by code and checked against its grand total, so the figures are exact. Uses the newest invoice aging PDF unless a document_id is given. Returns the table id to email, the sheet link and the headline figures.',
                 'inputSchema' => [
                     'type' => 'object',
                     'properties' => [
@@ -123,7 +125,7 @@ class AgentTools
             ],
             [
                 'name' => 'create_reserve_report',
-                'description' => 'Create or update the reserve account Google Sheet from a reserve account detail PDF: a RESERVE DETAIL tab with every reserve transaction line and a SUMMARY tab with the opening and closing reserve balance and totals per transaction and activity type. The same sheet is updated on every run. The PDF is read by code and checked against its grand total, so the figures are exact. Uses the newest reserve account detail PDF unless a document_id is given. Returns the table id to email, the sheet link and the headline figures.',
+                'description' => 'Create or update the reserve account tabs of the shared factoring Google Sheet from a reserve account detail PDF, placed after the aging tabs: a RESERVE DETAIL tab with every reserve transaction line and a SUMMARY tab with the opening and closing reserve balance and totals per transaction and activity type. The same sheet is updated on every run, keeping the other agents\' tabs. The PDF is read by code and checked against its grand total, so the figures are exact. Uses the newest reserve account detail PDF unless a document_id is given. Returns the table id to email, the sheet link and the headline figures.',
                 'inputSchema' => [
                     'type' => 'object',
                     'properties' => [
@@ -195,8 +197,8 @@ class AgentTools
     {
         return match ($name) {
             'collect_pdfs' => 'Collecting new PDFs from Gmail…',
-            'create_aging_report' => 'Reading the aging report and updating the Google Sheet…',
-            'create_reserve_report' => 'Reading the reserve account report and updating the Google Sheet…',
+            'create_aging_report' => 'Reading the aging report and updating its tabs in the Google Sheet…',
+            'create_reserve_report' => 'Reading the reserve account report and updating its tabs in the Google Sheet…',
             'find_pdfs' => 'Finding PDFs…',
             'build_table' => 'Reading the PDFs and building the table…',
             'upload_to_google_sheets' => 'Uploading to Google Sheets…',
@@ -214,8 +216,8 @@ class AgentTools
      * @param User $user
      * @param string $name
      * @param array<string, mixed> $input
-     * @param string|null $agentKey the agent running the tool (config/agents.php); its report goes to the same Google Sheet
-     * @param bool $newSheet put the agent's report in a new Google Sheet instead of updating its existing one
+     * @param string|null $agentKey the agent running the tool (config/agents.php); its report goes to its tabs of the shared Google Sheet
+     * @param bool $newSheet put the agent's report in a new copy of the shared Google Sheet instead of updating it
      * @param array<int, int>|null $documentIds the only PDFs the agent's report may be built from (picked in the agent settings); any when null
      * @return array{content: string, is_error: bool, progress: string, link?: string} content goes back to Claude; progress, and the link to a created sheet, go to the user
      */
@@ -288,8 +290,8 @@ class AgentTools
      * createAgingReport
      *
      * Read an invoice aging PDF in code and build the factoring workbook
-     * from it, then publish it to the agent's Google Sheet (see
-     * publishReport), keeping what the team typed into it. When the user
+     * from it, then publish it as the aging tabs of the shared Google Sheet
+     * (see publishReport), keeping what the team typed into them. When the user
      * picked PDFs in the agent settings, only those are used.
      *
      * @param User $user
@@ -314,18 +316,19 @@ class AgentTools
         }
 
         $asOf = $report['as_of'] ? now()->parse($report['as_of'])->format('M j, Y') : $document->sent_at->format('M j, Y');
-        $sheetName = trim("Aging report {$report['client']}");
-        $title = "{$sheetName}, as of {$asOf}";
+        $reportName = trim("Aging report {$report['client']}");
+        $title = "{$reportName}, as of {$asOf}";
         $summary = $this->workbook->summary($report);
 
-        [$sheet, $table] = $this->publishReport(
+        $fileName = $this->sharedSheetName($report['client']);
+
+        [$sheet, $table, $updated] = $this->publishReport(
             $user,
             $agentKey,
             $newSheet,
-            $sheetName,
+            $fileName,
             fn (?string $previous) => $this->workbook->build($report, $previous),
         );
-        $updated = $table->exists;
 
         $table->fill([
             'title' => $title,
@@ -353,7 +356,7 @@ class AgentTools
                 ...$summary,
             ]),
             'is_error' => false,
-            'progress' => sprintf('%s “%s”: %d invoices, $%s open.', $verb, $sheetName, $summary['invoices'], number_format($summary['balance'], 2)),
+            'progress' => sprintf('%s the aging tabs of “%s”: %d invoices, $%s open.', $verb, $fileName, $summary['invoices'], number_format($summary['balance'], 2)),
             'link' => $sheet['url'],
         ];
     }
@@ -362,8 +365,8 @@ class AgentTools
      * createReserveReport
      *
      * Read a reserve account detail PDF in code and build the reserve
-     * account workbook from it, then publish it to the agent's Google Sheet
-     * (see publishReport). When the user picked PDFs in the agent settings,
+     * account workbook from it, then publish it as the reserve tabs of the
+     * shared Google Sheet (see publishReport). When the user picked PDFs in the agent settings,
      * only those are used.
      *
      * @param User $user
@@ -386,23 +389,24 @@ class AgentTools
             throw new AgentToolException("{$document->filename}: {$e->getMessage()}");
         }
 
-        $sheetName = trim("Reserve account {$report['client']}");
+        $reportName = trim("Reserve account {$report['client']}");
         $period = $report['from'] && $report['to']
             ? now()->parse($report['from'])->format('M j, Y').' to '.now()->parse($report['to'])->format('M j, Y')
             : $document->sent_at->format('M j, Y');
         $summary = $this->reserveWorkbook->summary($report);
 
-        [$sheet, $table] = $this->publishReport(
+        $fileName = $this->sharedSheetName($report['client']);
+
+        [$sheet, $table, $updated] = $this->publishReport(
             $user,
             $agentKey,
             $newSheet,
-            $sheetName,
+            $fileName,
             fn () => $this->reserveWorkbook->build($report),
         );
-        $updated = $table->exists;
 
         $table->fill([
-            'title' => "{$sheetName}, {$period}",
+            'title' => "{$reportName}, {$period}",
             'request' => "Reserve account report from {$document->filename}",
             'summary' => sprintf('%d reserve lines from %d debtors, reserve balance $%s.', $summary['rows'], $summary['debtors'], number_format($summary['closing_balance'], 2)),
             'columns' => config('report_types.reserve_account_detail'),
@@ -425,7 +429,7 @@ class AgentTools
                 'grand_total' => $report['grand_total'],
             ]),
             'is_error' => false,
-            'progress' => sprintf('%s “%s”: %d lines, reserve balance $%s.', $verb, $sheetName, $summary['rows'], number_format($summary['closing_balance'], 2)),
+            'progress' => sprintf('%s the reserve tabs of “%s”: %d lines, reserve balance $%s.', $verb, $fileName, $summary['rows'], number_format($summary['closing_balance'], 2)),
             'link' => $sheet['url'],
         ];
     }
@@ -461,39 +465,57 @@ class AgentTools
     /**
      * publishReport
      *
-     * Put a report workbook in Google Sheets. Each agent has one sheet: the
-     * first run creates it, and later runs replace its contents in place, so
-     * the link stays the same. The build callback gets the sheet's current
-     * contents to carry the team's edits over. Without an agent (a custom
-     * task), when the user asked for a new sheet, or when the agent's sheet
-     * was deleted, a new sheet is created; later runs then update that one.
+     * Put a report workbook in Google Sheets. Every agent writes into one
+     * shared sheet, each into its own tabs (see SharedWorkbook): the first
+     * agent run creates it, and later runs of any agent replace their own
+     * tabs in place, so the link stays the same and the other agents' tabs
+     * are kept. The build callback gets the sheet's current contents to
+     * carry the team's edits over. When the user asked for a new sheet, a
+     * new copy is created with the agent's fresh tabs and the other agents'
+     * current ones; later runs then update that one. When the shared sheet
+     * was deleted a new one is started. Without an agent (a custom task),
+     * the workbook goes to a sheet of its own.
      *
      * @param User $user
      * @param string|null $agentKey
      * @param bool $newSheet
      * @param string $sheetName
-     * @param Closure(string|null): string $build returns the workbook's .xlsx bytes, given the current sheet's bytes or null
-     * @return array{0: array{id: string, url: string}, 1: ReportTable} the sheet, and the agent's saved table (unsaved when new)
+     * @param Closure(string|null): string $build returns the agent's workbook .xlsx bytes, given the current sheet's bytes or null
+     * @return array{0: array{id: string, url: string}, 1: ReportTable, 2: bool} the sheet, the agent's saved table (unsaved when new), and whether an existing sheet was updated
      * @throws AgentToolException
      */
     private function publishReport(User $user, ?string $agentKey, bool $newSheet, string $sheetName, Closure $build): array
     {
-        $existing = $agentKey === null || $newSheet ? null : $user->reportTables()
+        $shared = $agentKey === null ? null : $user->reportTables()
+            ->whereIn('report_key', array_keys(config('agents')))
+            ->whereNotNull('google_sheet_id')
+            ->latest('updated_at')
+            ->orderByDesc('id')
+            ->first();
+
+        $table = $agentKey === null || $newSheet ? null : $user->reportTables()
             ->where('report_key', $agentKey)
             ->whereNotNull('google_sheet_id')
             ->latest('updated_at')
             ->orderByDesc('id')
             ->first();
 
-        try {
-            if ($existing && $this->sheets->exists($user, $existing->google_sheet_id)) {
-                $previous = $this->sheets->export($user, $existing->google_sheet_id);
-                $sheet = $this->sheets->replace($user, $existing->google_sheet_id, $sheetName, $build($previous));
+        $table ??= $user->reportTables()->make(['report_key' => $agentKey]);
 
-                return [$sheet, $existing];
+        try {
+            $previous = $shared && $this->sheets->exists($user, $shared->google_sheet_id)
+                ? $this->sheets->export($user, $shared->google_sheet_id)
+                : null;
+
+            $xlsx = $agentKey === null
+                ? $build(null)
+                : $this->sharedWorkbook->merge($agentKey, $build($newSheet ? null : $previous), $previous);
+
+            if ($previous !== null && ! $newSheet) {
+                return [$this->sheets->replace($user, $shared->google_sheet_id, $sheetName, $xlsx), $table, true];
             }
 
-            $sheet = $this->sheets->upload($user, $sheetName, $build(null));
+            $sheet = $this->sheets->upload($user, $sheetName, $xlsx);
         } catch (AuthenticationException|AuthorizationException $e) {
             throw new AgentToolException($e->getMessage());
         } catch (RequestException $e) {
@@ -502,7 +524,20 @@ class AgentTools
             throw new AgentToolException('Google Drive could not take the file right now.');
         }
 
-        return [$sheet, $user->reportTables()->make(['report_key' => $agentKey])];
+        return [$sheet, $table, false];
+    }
+
+    /**
+     * sharedSheetName
+     *
+     * The title of the Google Sheet every agent writes into.
+     *
+     * @param string|null $client the client named on the report
+     * @return string
+     */
+    private function sharedSheetName(?string $client): string
+    {
+        return trim("Factoring report {$client}");
     }
 
     /**

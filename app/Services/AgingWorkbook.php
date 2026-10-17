@@ -86,6 +86,26 @@ class AgingWorkbook
     public function __construct(private AgingDashboard $dashboard = new AgingDashboard) {}
 
     /**
+     * tabs
+     *
+     * The tabs this workbook has, in order. In the shared Google Sheet these
+     * are the invoice aging agent's tabs (see SharedWorkbook).
+     *
+     * @return array<int, string>
+     */
+    public static function tabs(): array
+    {
+        return [
+            AgingDashboard::TITLE,
+            'AGING',
+            ...array_keys(self::HEADER_ONLY_TABS_AFTER_AGING),
+            ...array_map(fn (int $days) => "Aging {$days}+", self::THRESHOLDS),
+            ...array_keys(self::HEADER_ONLY_TABS_AFTER_THRESHOLDS),
+            'data',
+        ];
+    }
+
+    /**
      * build
      *
      * The workbook's .xlsx bytes. When the previous version of the sheet is

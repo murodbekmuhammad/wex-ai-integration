@@ -15,11 +15,11 @@ const reportName = (agent) => (agent?.report_type || '').replaceAll('_', ' ');
 const reportLabel = (agent) => reportName(agent).replace(/^./, (letter) => letter.toUpperCase());
 const report = computed(() => reportName(agents.value.find((agent) => agent.key === agentKey.value)));
 
-// Where a run puts its report: the agent's existing Google Sheet, or a new one.
+// Where a run puts its report: every agent has its own tabs in one shared Google Sheet, updated in place or copied to a new one.
 const sheetMode = ref('existing');
 const sheetOptions = [
-    { value: 'existing', label: 'Existing Google Sheet', hint: 'Every run updates the same sheet and keeps your team’s notes.' },
-    { value: 'new', label: 'New Google Sheet', hint: 'Every run puts its report in a new sheet.' },
+    { value: 'existing', label: 'Existing Google Sheet', hint: 'Every run updates this agent’s tabs in the shared sheet and keeps your team’s notes and the other agents’ tabs.' },
+    { value: 'new', label: 'New Google Sheet', hint: 'Every run starts a new copy of the shared sheet with this agent’s fresh tabs and the other agents’ tabs.' },
 ];
 
 // The agent's PDFs collected from email; with "all" on, the agent uses every one of them.
@@ -180,7 +180,7 @@ onMounted(async () => {
                         </span>
                         <div>
                             <h2 class="font-semibold text-zinc-950">Google Sheet</h2>
-                            <p class="mt-1 text-sm text-zinc-500">Where each run puts its report.</p>
+                            <p class="mt-1 text-sm text-zinc-500">All agents share one sheet; each run updates only its own tabs.</p>
                         </div>
                     </div>
 

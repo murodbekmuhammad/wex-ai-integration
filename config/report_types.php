@@ -17,21 +17,6 @@ return [
         '91-120 Days',
         '121+ Days',
     ],
-    'payment_report' => [
-        'Payor/Check#',
-        'Invoice#',
-        'Purchased',
-        'Sch#',
-        'Invoice Amount',
-        'Days',
-        'Check Amount',
-        'Payment Amount',
-        'Adjust Type',
-        'Adjust Amount',
-        'Escrow Amount',
-        'Fee Earned',
-        'Taxes Held',
-    ],
     'chargeback_report' => [
         'Posted',
         'Invoice#',
@@ -94,6 +79,21 @@ return [
         'Reserve Amount',
         'Reserve Balance',
     ],
+    'daily_payment_report' => [
+        'Payor/Check#',
+        'Invoice#',
+        'Purchased',
+        'Sch#',
+        'Invoice Amount',
+        'Days',
+        'Check Amount',
+        'Payment Amount',
+        'Adjust Type',
+        'Adjust Amount',
+        'Escrow Amount',
+        'Fee Earned',
+        'Taxes Held',
+    ],
     'client_activity_statement' => [
         'Date',
         'Accounts Receivable' => [
@@ -115,5 +115,5 @@ return [
             'Funding',
             'Cash Reserve',
         ],
-    ]
+    ],
 ];
