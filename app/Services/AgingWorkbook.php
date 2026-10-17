@@ -150,8 +150,9 @@ class AgingWorkbook
 
         $spreadsheet->setActiveSheetIndex(0);
 
+        // Google recalculates every formula when it converts the upload, so they aren't calculated here.
         ob_start();
-        (new Xlsx($spreadsheet))->setIncludeCharts(true)->save('php://output');
+        (new Xlsx($spreadsheet))->setIncludeCharts(true)->setPreCalculateFormulas(false)->save('php://output');
 
         return (string) ob_get_clean();
     }
@@ -410,6 +411,10 @@ class AgingWorkbook
     /**
      * load
      *
+     * Read the previous version's cells that have a value. The sheet Google
+     * exports has formatting on every cell of its 1,000-row grid; reading
+     * those empty cells too takes several times the memory and time.
+     *
      * @param string $xlsx workbook bytes
      * @return Spreadsheet
      */
@@ -419,7 +424,7 @@ class AgingWorkbook
         file_put_contents($path, $xlsx);
 
         try {
-            return IOFactory::load($path);
+            return IOFactory::createReader('Xlsx')->setReadEmptyCells(false)->load($path);
         } finally {
             unlink($path);
         }

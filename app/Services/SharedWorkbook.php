@@ -81,8 +81,9 @@ class SharedWorkbook
 
         $book->setActiveSheetIndex(0);
 
+        // Google recalculates every formula when it converts the upload, so they aren't calculated here.
         ob_start();
-        (new Xlsx($book))->setIncludeCharts(true)->save('php://output');
+        (new Xlsx($book))->setIncludeCharts(true)->setPreCalculateFormulas(false)->save('php://output');
         $xlsx = (string) ob_get_clean();
 
         $book->disconnectWorksheets();
