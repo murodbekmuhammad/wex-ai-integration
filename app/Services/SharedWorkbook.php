@@ -56,7 +56,7 @@ class SharedWorkbook
         }
 
         $book = $this->load($built);
-        $old = $this->load($previous);
+        $old = $this->load($previous, false);
         $own = $book->getSheetNames();
         $replaced = [...$own, ...$this->tabs($agentKey)];
 
@@ -95,11 +95,14 @@ class SharedWorkbook
      * load
      *
      * Read a workbook with its charts, so the dashboard's charts survive.
+     * The sheet Google exports has formatting on thousands of empty cells;
+     * leaving those out keeps a run within PHP's memory limit.
      *
      * @param string $xlsx workbook bytes
+     * @param bool $emptyCells whether to read cells that have formatting but no value
      * @return Spreadsheet
      */
-    private function load(string $xlsx): Spreadsheet
+    private function load(string $xlsx, bool $emptyCells = true): Spreadsheet
     {
         $path = tempnam(sys_get_temp_dir(), 'sheet');
         file_put_contents($path, $xlsx);
@@ -108,7 +111,7 @@ class SharedWorkbook
             /** @var XlsxReader $reader */
             $reader = IOFactory::createReader('Xlsx');
 
-            return $reader->setIncludeCharts(true)->load($path);
+            return $reader->setIncludeCharts(true)->setReadEmptyCells($emptyCells)->load($path);
         } finally {
             unlink($path);
         }

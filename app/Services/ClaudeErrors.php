@@ -54,4 +54,37 @@ class ClaudeErrors
     {
         return ! ($e instanceof AuthenticationException || $e instanceof RateLimitException);
     }
+
+    /**
+     * fatal
+     *
+     * The PHP error that ended the request, when it was fatal: one that
+     * can't be caught, like running out of memory or time. Exceptions are
+     * caught where they happen, so only these end a request this way.
+     *
+     * @return array{type: int, message: string, file: string, line: int}|null
+     */
+    public static function fatal(): ?array
+    {
+        $error = error_get_last();
+
+        return $error && in_array($error['type'], [E_ERROR, E_CORE_ERROR, E_COMPILE_ERROR, E_PARSE], true) ? $error : null;
+    }
+
+    /**
+     * describeFatal
+     *
+     * A fatal PHP error (see fatal) as a message the user can act on.
+     *
+     * @param array{message: string} $error
+     * @return string
+     */
+    public static function describeFatal(array $error): string
+    {
+        return match (true) {
+            str_contains($error['message'], 'Allowed memory size') => 'The run ran out of memory on the server. Please try again; if it keeps happening, the server needs a higher PHP memory limit.',
+            str_contains($error['message'], 'Maximum execution time') => 'The run took longer than the server allows. Please try again.',
+            default => self::UNEXPECTED,
+        };
+    }
 }

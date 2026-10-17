@@ -58,7 +58,9 @@ abstract class Controller
      *
      * Stream a generator of events back to the browser as newline-delimited
      * JSON, one event per line. Any failure becomes a final "error" event,
-     * so the stream always stays valid JSON lines.
+     * so the stream always stays valid JSON lines; that includes a fatal
+     * PHP error such as running out of memory, which ends the request
+     * without an exception.
      *
      * @param Closure(): iterable<int, array<string, mixed>> $events
      * @param int|null $timeLimit seconds the stream may take; the usual Claude time limit when null
@@ -77,6 +79,14 @@ abstract class Controller
                 flush();
             };
 
+            $finished = false;
+
+            register_shutdown_function(function () use (&$finished, $send) {
+                if (! $finished && $error = ClaudeErrors::fatal()) {
+                    $send(['type' => 'error', 'text' => ClaudeErrors::describeFatal($error)]);
+                }
+            });
+
             try {
                 foreach ($events() as $event) {
                     $send($event);
@@ -92,6 +102,8 @@ abstract class Controller
 
                 $send(['type' => 'error', 'text' => ClaudeErrors::UNEXPECTED]);
             }
+
+            $finished = true;
         }, 200, [
             'Content-Type' => 'application/x-ndjson; charset=utf-8',
             'Cache-Control' => 'no-cache',

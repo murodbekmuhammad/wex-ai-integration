@@ -141,8 +141,9 @@ class AgentController extends Controller
      *
      * Pass the agent's events through, noting its steps, sheet link and
      * summary, and save them as an AgentRun once the run ends, whether it
-     * finished, hit the turn limit or failed. An unexpected exception is
-     * saved on the run's error.
+     * finished, hit the turn limit or failed. An unexpected exception, or
+     * a fatal PHP error such as running out of memory, is saved on the
+     * run's error.
      *
      * @param User $user
      * @param string $key
@@ -160,6 +161,32 @@ class AgentController extends Controller
         $status = 'failed';
         $summary = null;
         $error = null;
+        $saved = false;
+
+        $save = function () use ($user, $key, $sheetMode, $startedAt, &$steps, &$sheetUrl, &$status, &$summary, &$error, &$saved) {
+            $saved = true;
+
+            $user->agentRuns()->create([
+                'agent_key' => $key,
+                'sheet_mode' => $sheetMode,
+                'status' => $status,
+                'summary' => $summary,
+                'error' => $error,
+                'google_sheet_url' => $sheetUrl,
+                'steps' => $steps,
+                'started_at' => $startedAt,
+                'finished_at' => now(),
+            ]);
+        };
+
+        // A fatal PHP error, like running out of memory, skips the finally block below.
+        register_shutdown_function(function () use (&$saved, &$summary, &$error, $save) {
+            if (! $saved && $fatal = ClaudeErrors::fatal()) {
+                $summary = ClaudeErrors::describeFatal($fatal);
+                $error = "{$fatal['message']} at {$fatal['file']}:{$fatal['line']}";
+                $save();
+            }
+        });
 
         try {
             foreach ($events as $event) {
@@ -185,17 +212,7 @@ class AgentController extends Controller
 
             throw $e;
         } finally {
-            $user->agentRuns()->create([
-                'agent_key' => $key,
-                'sheet_mode' => $sheetMode,
-                'status' => $status,
-                'summary' => $summary,
-                'error' => $error,
-                'google_sheet_url' => $sheetUrl,
-                'steps' => $steps,
-                'started_at' => $startedAt,
-                'finished_at' => now(),
-            ]);
+            $save();
         }
     }
 }
