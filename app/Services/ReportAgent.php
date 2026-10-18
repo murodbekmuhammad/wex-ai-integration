@@ -36,6 +36,8 @@ class ReportAgent
 
         For the reserve account report, use create_reserve_report the same way: it reads the newest reserve account detail PDF in code and creates the workbook as a Google Sheet. Run collect_pdfs first when the task says to fetch new emails or it finds no reserve account detail PDF.
 
+        For the FACTORING-BIPOLAR tab, run create_aging_report, then create_payment_report, then create_factoring_bipolar_report, one at a time: it reads the tabs the first two write into the shared sheet.
+
         For any other table: find the PDFs the task is about with find_pdfs, build the table the user wants from them with build_table and upload it with upload_to_google_sheets.
 
         Email the link with email_sheet_link when the task asks for it and that tool is available; without it, the user sees the sheet link on screen, so say so in your summary. Only take the steps the task asks for; don't upload or email unless asked. When the task names no dates, use the current month so far.
@@ -66,7 +68,7 @@ class ReportAgent
      * @param string $task what the user wants done
      * @param array<int, string>|null $tools names of the tools Claude may use; every tool when null
      * @param string|null $agentKey the configured agent being run, whose report goes to its own Google Sheet
-     * @param bool $newSheet put the agent's report in a new Google Sheet instead of updating its existing one
+     * @param bool $newSheet put the agent's report in a new Google Sheet instead of updating its existing one; later reports of the same run update that new sheet
      * @param array<int, int>|null $documentIds the only PDFs the agent's report may be built from (picked in the agent settings); any when null
      * @return Generator<int, array{type: string, tool?: string, label?: string, ok?: bool, text?: string, link?: string|null}>
      * @throws APIException
@@ -110,6 +112,11 @@ class ReportAgent
                 $result = in_array($block->name, $allowed, true)
                     ? $this->tools->run($user, $block->name, (array) $block->input, $agentKey, $newSheet, $documentIds)
                     : ['content' => "The tool {$block->name} isn't available for this task.", 'is_error' => true, 'progress' => "Skipped {$block->name}: not available for this task."];
+
+                // Once a tool put the report in a new sheet, the run's later reports go into that same sheet.
+                if (! $result['is_error'] && isset($result['link'])) {
+                    $newSheet = false;
+                }
 
                 yield [
                     'type' => 'result',

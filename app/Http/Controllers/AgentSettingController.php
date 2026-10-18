@@ -23,7 +23,8 @@ class AgentSettingController extends Controller
      *
      * One agent's settings, or the defaults when none are saved, with the
      * PDFs of its report type collected from the user's mailbox to pick
-     * from, and the agents to switch between. The first agent is shown when
+     * from (none for an agent without a report type), and the agents to
+     * switch between. The first agent is shown when
      * none is asked for.
      *
      * @param Request $request
@@ -35,7 +36,8 @@ class AgentSettingController extends Controller
         $key = $request->validate(['agent' => ['nullable', 'string', Rule::in(array_keys($agents))]])['agent'] ?? array_key_first($agents);
         $user = $request->user();
 
-        $pdfs = $user->pdfDocuments()
+        // An agent without a report type of its own uses the PDFs picked for the agents whose tools it runs.
+        $pdfs = $agents[$key]['report_type'] === null ? [] : $user->pdfDocuments()
             ->where('report_type', $agents[$key]['report_type'])
             ->orderByDesc('sent_at')
             ->orderByDesc('id')

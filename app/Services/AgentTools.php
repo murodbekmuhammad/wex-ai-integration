@@ -14,6 +14,7 @@ use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
+use stdClass;
 use Symfony\Component\Mailer\Exception\TransportExceptionInterface;
 use Throwable;
 
@@ -24,8 +25,9 @@ use Throwable;
  *
  * The actions the report agent can take on the user's behalf: collecting
  * PDFs from Gmail, finding collected PDFs, building a table, the aging
- * report, reserve account or payment report workbook from them, uploading to
- * Google Sheets and emailing the link. Every lookup is scoped to the user, and email
+ * report, reserve account or payment report workbook from them, the
+ * FACTORING-BIPOLAR tab from those tabs, uploading to Google Sheets and
+ * emailing the link. Every lookup is scoped to the user, and email
  * only goes to the user's own sign-in address, never one Claude picks.
  */
 class AgentTools
@@ -41,6 +43,17 @@ class AgentTools
     public const DEFAULT_COLLECT_DAYS = 7;
 
     /**
+     * The agent (config/agents.php) whose tabs each report tool writes. An
+     * agent that runs another agent's tool, like the factoring bipolar
+     * agent, runs it as that agent.
+     */
+    private const TOOL_AGENTS = [
+        'create_aging_report' => 'invoice_aging',
+        'create_reserve_report' => 'reserve_account',
+        'create_payment_report' => 'payment_report',
+    ];
+
+    /**
      * __construct
      *
      * @param TableBuilder $builder
@@ -54,6 +67,7 @@ class AgentTools
      * @param PaymentReportParser $paymentParser
      * @param PaymentWorkbook $paymentWorkbook
      * @param SharedWorkbook $sharedWorkbook
+     * @param FactoringBipolarWorkbook $bipolarWorkbook
      */
     public function __construct(
         private TableBuilder $builder,
@@ -67,6 +81,7 @@ class AgentTools
         private PaymentReportParser $paymentParser,
         private PaymentWorkbook $paymentWorkbook,
         private SharedWorkbook $sharedWorkbook,
+        private FactoringBipolarWorkbook $bipolarWorkbook,
     ) {}
 
     /**
@@ -148,6 +163,11 @@ class AgentTools
                 ],
             ],
             [
+                'name' => 'create_factoring_bipolar_report',
+                'description' => 'Create or update the FACTORING-BIPOLAR tab of the shared factoring Google Sheet, placed after the payment report tabs, from the AGING and PAYMENT DETAIL tabs already in the sheet: one line per payment line whose Invoice# is on AGING, with the broker, invoice, load id, invoice date and invoice amount from AGING, the payment amount and check date from PAYMENT DETAIL, the difference and the days from invoice to payment. Run create_aging_report and create_payment_report first so those tabs are current. Returns the table id to email, the sheet link and the headline figures.',
+                'inputSchema' => ['type' => 'object', 'properties' => new stdClass],
+            ],
+            [
                 'name' => 'find_pdfs',
                 'description' => 'List the PDFs already collected from the user\'s mailbox that were emailed between two dates, newest first, optionally only one report type or only certain senders. Returns each PDF\'s id, filename, sender, subject, date and report type (null when unknown), up to '.self::MAX_LISTED.' PDFs.',
                 'inputSchema' => [
@@ -214,6 +234,7 @@ class AgentTools
             'create_aging_report' => 'Reading the aging report and updating its tabs in the Google Sheet…',
             'create_reserve_report' => 'Reading the reserve account report and updating its tabs in the Google Sheet…',
             'create_payment_report' => 'Reading the payment report and updating its tabs in the Google Sheet…',
+            'create_factoring_bipolar_report' => 'Matching payments to the aging list and updating the FACTORING-BIPOLAR tab…',
             'find_pdfs' => 'Finding PDFs…',
             'build_table' => 'Reading the PDFs and building the table…',
             'upload_to_google_sheets' => 'Uploading to Google Sheets…',
@@ -238,12 +259,20 @@ class AgentTools
      */
     public function run(User $user, string $name, array $input, ?string $agentKey = null, bool $newSheet = false, ?array $documentIds = null): array
     {
+        $owner = self::TOOL_AGENTS[$name] ?? null;
+
+        if ($agentKey !== null && $owner !== null && $owner !== $agentKey) {
+            $agentKey = $owner;
+            $documentIds = $user->agentSettingFor($owner)->pdf_document_ids;
+        }
+
         try {
             return match ($name) {
                 'collect_pdfs' => $this->collectPdfs($user, $input),
                 'create_aging_report' => $this->createAgingReport($user, $input, $agentKey, $newSheet, $documentIds),
                 'create_reserve_report' => $this->createReserveReport($user, $input, $agentKey, $newSheet, $documentIds),
                 'create_payment_report' => $this->createPaymentReport($user, $input, $agentKey, $newSheet, $documentIds),
+                'create_factoring_bipolar_report' => $this->createFactoringBipolarReport($user, $agentKey, $newSheet),
                 'find_pdfs' => $this->findPdfs($user, $input),
                 'build_table' => $this->buildTable($user, $input),
                 'upload_to_google_sheets' => $this->uploadToGoogleSheets($user, $input),
@@ -525,6 +554,74 @@ class AgentTools
     }
 
     /**
+     * createFactoringBipolarReport
+     *
+     * Read the AGING and PAYMENT DETAIL tabs of the shared Google Sheet and
+     * publish the FACTORING-BIPOLAR tab built from them (see publishReport).
+     *
+     * @param User $user
+     * @param string|null $agentKey
+     * @param bool $newSheet
+     * @return array{content: string, is_error: bool, progress: string, link: string}
+     * @throws AgentToolException
+     */
+    private function createFactoringBipolarReport(User $user, ?string $agentKey, bool $newSheet): array
+    {
+        $report = null;
+
+        [$sheet, $table, $updated] = $this->publishReport(
+            $user,
+            $agentKey,
+            $newSheet,
+            function () use (&$report) {
+                return $this->sharedSheetName($report['client'] ?? null);
+            },
+            function (?string $previous) use (&$report) {
+                if (! $previous) {
+                    throw new AgentToolException('There is no shared factoring Google Sheet to read yet. Run create_aging_report and create_payment_report first.');
+                }
+
+                try {
+                    $report = $this->bipolarWorkbook->report($previous);
+                } catch (FactoringBipolarException $e) {
+                    throw new AgentToolException($e->getMessage());
+                }
+
+                return $this->bipolarWorkbook->build($report['rows']);
+            },
+        );
+
+        $summary = $this->bipolarWorkbook->summary($report);
+        $fileName = $this->sharedSheetName($report['client']);
+
+        $table->fill([
+            'title' => trim("Factoring-Bipolar {$report['client']}"),
+            'request' => 'FACTORING-BIPOLAR tab from the AGING and PAYMENT DETAIL tabs',
+            'summary' => sprintf('%d payment lines for %d aging invoices, $%s paid, $%s difference.', $summary['rows'], $summary['invoices'], number_format($summary['paid'], 2), number_format($summary['difference'], 2)),
+            'columns' => FactoringBipolarWorkbook::COLUMNS,
+            'rows' => array_map(fn (array $row) => array_values($row), $report['rows']),
+            'warnings' => [],
+            'pdf_document_ids' => [],
+            'google_sheet_id' => $sheet['id'],
+            'google_sheet_url' => $sheet['url'],
+        ])->save();
+
+        $verb = $updated ? 'Updated' : 'Created';
+
+        return [
+            'content' => $this->json([
+                'table_id' => $table->id,
+                'sheet' => $updated ? 'updated the existing sheet' : 'created a new sheet',
+                'google_sheet_url' => $sheet['url'],
+                ...$summary,
+            ]),
+            'is_error' => false,
+            'progress' => sprintf('%s the FACTORING-BIPOLAR tab of “%s”: %d payment lines, $%s difference.', $verb, $fileName, $summary['rows'], number_format($summary['difference'], 2)),
+            'link' => $sheet['url'],
+        ];
+    }
+
+    /**
      * latestDocument
      *
      * The newest of the user's PDFs of a report type, or the one with the
@@ -569,12 +666,12 @@ class AgentTools
      * @param User $user
      * @param string|null $agentKey
      * @param bool $newSheet
-     * @param string $sheetName
+     * @param string|Closure(): string $sheetName the sheet's title, or a callback giving it once the workbook is built
      * @param Closure(string|null): string $build returns the agent's workbook .xlsx bytes, given the current sheet's bytes or null
      * @return array{0: array{id: string, url: string}, 1: ReportTable, 2: bool} the sheet, the agent's saved table (unsaved when new), and whether an existing sheet was updated
      * @throws AgentToolException
      */
-    private function publishReport(User $user, ?string $agentKey, bool $newSheet, string $sheetName, Closure $build): array
+    private function publishReport(User $user, ?string $agentKey, bool $newSheet, string|Closure $sheetName, Closure $build): array
     {
         $shared = $agentKey === null ? null : $user->reportTables()
             ->whereIn('report_key', array_keys(config('agents')))
@@ -600,6 +697,7 @@ class AgentTools
             $xlsx = $agentKey === null
                 ? $build(null)
                 : $this->sharedWorkbook->merge($agentKey, $build($newSheet ? null : $previous), $previous);
+            $sheetName = $sheetName instanceof Closure ? $sheetName() : $sheetName;
 
             if ($previous !== null && ! $newSheet) {
                 return [$this->sheets->replace($user, $shared->google_sheet_id, $sheetName, $xlsx), $table, true];

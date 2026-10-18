@@ -12,8 +12,11 @@ const emit = defineEmits(['logout']);
 const agents = ref([]);
 const agentKey = ref('');
 const reportName = (agent) => (agent?.report_type || '').replaceAll('_', ' ');
-const reportLabel = (agent) => reportName(agent).replace(/^./, (letter) => letter.toUpperCase());
-const report = computed(() => reportName(agents.value.find((agent) => agent.key === agentKey.value)));
+const reportLabel = (agent) => (reportName(agent) || agent.name).replace(/^./, (letter) => letter.toUpperCase());
+const current = computed(() => agents.value.find((agent) => agent.key === agentKey.value));
+const report = computed(() => reportName(current.value));
+// An agent without a report type of its own, like Factoring-Bipolar, uses the PDFs picked for the agents it runs.
+const ownPdfs = computed(() => Boolean(current.value?.report_type));
 
 // Where a run puts its report: every agent has its own tabs in one shared Google Sheet, updated in place or copied to a new one.
 const sheetMode = ref('existing');
@@ -195,7 +198,19 @@ onMounted(async () => {
                     </div>
                 </section>
 
-                <section class="card overflow-hidden transition-opacity" :class="{ 'opacity-60': switching }">
+                <section v-if="!ownPdfs" class="card p-5 sm:p-6">
+                    <div class="flex items-start gap-4">
+                        <span class="icon-badge bg-rose-50 text-rose-600 ring-rose-600/10">
+                            <Icon name="document" class="size-5" />
+                        </span>
+                        <div>
+                            <h2 class="font-semibold text-zinc-950">PDFs</h2>
+                            <p class="mt-1 text-sm text-zinc-500">This agent runs the invoice aging and payment report agents, with the PDFs picked for each of them, and builds its tab from their tabs.</p>
+                        </div>
+                    </div>
+                </section>
+
+                <section v-else class="card overflow-hidden transition-opacity" :class="{ 'opacity-60': switching }">
                     <div class="flex items-start gap-4 p-5 sm:p-6">
                         <span class="icon-badge bg-rose-50 text-rose-600 ring-rose-600/10">
                             <Icon name="document" class="size-5" />
